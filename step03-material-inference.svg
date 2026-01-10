@@ -1,0 +1,355 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1800 840" width="1800" height="840">
+  <defs>
+    <!-- Gradients -->
+    <linearGradient id="bgGrad3" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#0a0a0f"/>
+      <stop offset="100%" style="stop-color:#12121a"/>
+    </linearGradient>
+    <linearGradient id="purpleGrad3" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#7c3aed"/>
+      <stop offset="100%" style="stop-color:#a855f7"/>
+    </linearGradient>
+    <linearGradient id="heatmapGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#10b981"/>
+      <stop offset="33%" style="stop-color:#f59e0b"/>
+      <stop offset="66%" style="stop-color:#ef4444"/>
+      <stop offset="100%" style="stop-color:#7c3aed"/>
+    </linearGradient>
+    <!-- Filters -->
+    <filter id="glow3" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <!-- Grid pattern -->
+    <pattern id="grid3" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1e1e2e" stroke-width="0.5"/>
+    </pattern>
+  </defs>
+  
+  <!-- Background -->
+  <rect width="1800" height="840" fill="url(#bgGrad3)"/>
+  <rect width="1800" height="840" fill="url(#grid3)" opacity="0.4"/>
+  
+  <!-- Title -->
+  <text x="900" y="60" font-family="'SF Mono', 'Fira Code', monospace" font-size="28" fill="#00d4ff" text-anchor="middle" font-weight="600" filter="url(#glow3)">STEP 03: MATERIAL INFERENCE</text>
+  <text x="900" y="90" font-family="'SF Mono', 'Fira Code', monospace" font-size="14" fill="#6b7280" text-anchor="middle">Fabric Property Analysis via Wrinkle Pattern &amp; Texture Recognition</text>
+  
+  <!-- Left Panel: Model & Analysis -->
+  <g transform="translate(80, 130)">
+    <rect x="0" y="0" width="480" height="320" rx="8" fill="#1a1a2e" stroke="#7c3aed" stroke-width="2"/>
+    <rect x="0" y="0" width="480" height="40" rx="8" fill="#7c3aed" opacity="0.2"/>
+    <text x="20" y="27" font-family="'SF Mono', 'Fira Code', monospace" font-size="15" fill="#7c3aed" font-weight="600">MATERIAL INFERENCE ENGINE</text>
+    
+    <text x="20" y="70" font-family="'SF Mono', 'Fira Code', monospace" font-size="14" fill="#00d4ff">Vision Transformer (ViT / Swin)</text>
+    <text x="20" y="95" font-family="'SF Mono', 'Fira Code', monospace" font-size="11" fill="#6b7280">Pre-trained on fabric texture dataset</text>
+    
+    <line x1="20" y1="115" x2="460" y2="115" stroke="#2a2a3e" stroke-width="1"/>
+    
+    <!-- Wrinkle Frequency Analysis -->
+    <text x="20" y="145" font-family="'SF Mono', 'Fira Code', monospace" font-size="13" fill="#f59e0b" font-weight="500">WRINKLE FREQUENCY ANALYSIS</text>
+    
+    <!-- Frequency Graph -->
+    <g transform="translate(20, 160)">
+      <rect x="0" y="0" width="440" height="100" rx="4" fill="#0d0d15" stroke="#2a2a3e" stroke-width="1"/>
+      
+      <!-- Grid lines -->
+      <line x1="0" y1="25" x2="440" y2="25" stroke="#2a2a3e" stroke-width="0.5"/>
+      <line x1="0" y1="50" x2="440" y2="50" stroke="#2a2a3e" stroke-width="0.5"/>
+      <line x1="0" y1="75" x2="440" y2="75" stroke="#2a2a3e" stroke-width="0.5"/>
+      
+      <!-- High frequency wave (stiff fabric) -->
+      <path d="M10,30 Q25,10 40,30 T70,30 T100,30 T130,30 T160,30 T190,30 T220,30 T250,30 T280,30 T310,30 T340,30 T370,30 T400,30 T430,30" 
+            stroke="#ef4444" stroke-width="2" fill="none" opacity="0.8"/>
+      
+      <!-- Medium frequency wave -->
+      <path d="M10,50 Q40,25 70,50 T130,50 T190,50 T250,50 T310,50 T370,50 T430,50" 
+            stroke="#f59e0b" stroke-width="2" fill="none" opacity="0.8"/>
+      
+      <!-- Low frequency wave (soft fabric) -->
+      <path d="M10,75 Q80,40 150,75 T290,75 T430,75" 
+            stroke="#10b981" stroke-width="2" fill="none" opacity="0.8"/>
+      
+      <!-- Labels -->
+      <text x="435" y="35" font-family="'SF Mono', 'Fira Code', monospace" font-size="9" fill="#ef4444" text-anchor="end">High-freq</text>
+      <text x="435" y="55" font-family="'SF Mono', 'Fira Code', monospace" font-size="9" fill="#f59e0b" text-anchor="end">Med-freq</text>
+      <text x="435" y="80" font-family="'SF Mono', 'Fira Code', monospace" font-size="9" fill="#10b981" text-anchor="end">Low-freq</text>
+    </g>
+    
+    <!-- FFT Formula -->
+    <text x="20" y="285" font-family="'SF Mono', 'Fira Code', monospace" font-size="12" fill="#00d4ff">FFT Analysis:</text>
+    <text x="20" y="305" font-family="'SF Mono', 'Fira Code', monospace" font-size="11" fill="#9ca3af">High-freq = Stiff (linen, denim) | Low-freq = Soft (silk, jersey)</text>
+  </g>
+  
+  <!-- Right Panel: Heatmap Visualization -->
+  <g transform="translate(600, 130)">
+    <rect x="0" y="0" width="520" height="320" rx="8" fill="#1a1a2e" stroke="#10b981" stroke-width="2"/>
+    <rect x="0" y="0" width="520" height="40" rx="8" fill="#10b981" opacity="0.15"/>
+    <text x="20" y="27" font-family="'SF Mono', 'Fira Code', monospace" font-size="15" fill="#10b981" font-weight="600">SHADOW/TEXTURE PATTERN ANALYSIS</text>
+    
+    <!-- Heatmap Grid -->
+    <g transform="translate(30, 60)">
+      <!-- 8x8 heatmap grid -->
+      <!-- Row 1 -->
+      <rect x="0" y="0" width="28" height="28" fill="#10b981" opacity="0.3"/>
+      <rect x="30" y="0" width="28" height="28" fill="#10b981" opacity="0.5"/>
+      <rect x="60" y="0" width="28" height="28" fill="#f59e0b" opacity="0.4"/>
+      <rect x="90" y="0" width="28" height="28" fill="#f59e0b" opacity="0.6"/>
+      <rect x="120" y="0" width="28" height="28" fill="#ef4444" opacity="0.5"/>
+      <rect x="150" y="0" width="28" height="28" fill="#f59e0b" opacity="0.4"/>
+      <rect x="180" y="0" width="28" height="28" fill="#10b981" opacity="0.5"/>
+      <rect x="210" y="0" width="28" height="28" fill="#10b981" opacity="0.3"/>
+      
+      <!-- Row 2 -->
+      <rect x="0" y="30" width="28" height="28" fill="#10b981" opacity="0.4"/>
+      <rect x="30" y="30" width="28" height="28" fill="#f59e0b" opacity="0.5"/>
+      <rect x="60" y="30" width="28" height="28" fill="#ef4444" opacity="0.6"/>
+      <rect x="90" y="30" width="28" height="28" fill="#ef4444" opacity="0.8"/>
+      <rect x="120" y="30" width="28" height="28" fill="#7c3aed" opacity="0.7"/>
+      <rect x="150" y="30" width="28" height="28" fill="#ef4444" opacity="0.6"/>
+      <rect x="180" y="30" width="28" height="28" fill="#f59e0b" opacity="0.5"/>
+      <rect x="210" y="30" width="28" height="28" fill="#10b981" opacity="0.4"/>
+      
+      <!-- Row 3 -->
+      <rect x="0" y="60" width="28" height="28" fill="#f59e0b" opacity="0.4"/>
+      <rect x="30" y="60" width="28" height="28" fill="#ef4444" opacity="0.5"/>
+      <rect x="60" y="60" width="28" height="28" fill="#7c3aed" opacity="0.6"/>
+      <rect x="90" y="60" width="28" height="28" fill="#7c3aed" opacity="0.9"/>
+      <rect x="120" y="60" width="28" height="28" fill="#7c3aed" opacity="0.85"/>
+      <rect x="150" y="60" width="28" height="28" fill="#7c3aed" opacity="0.6"/>
+      <rect x="180" y="60" width="28" height="28" fill="#ef4444" opacity="0.5"/>
+      <rect x="210" y="60" width="28" height="28" fill="#f59e0b" opacity="0.4"/>
+      
+      <!-- Row 4 -->
+      <rect x="0" y="90" width="28" height="28" fill="#f59e0b" opacity="0.5"/>
+      <rect x="30" y="90" width="28" height="28" fill="#ef4444" opacity="0.7"/>
+      <rect x="60" y="90" width="28" height="28" fill="#7c3aed" opacity="0.8"/>
+      <rect x="90" y="90" width="28" height="28" fill="#00d4ff" opacity="0.9"/>
+      <rect x="120" y="90" width="28" height="28" fill="#00d4ff" opacity="0.85"/>
+      <rect x="150" y="90" width="28" height="28" fill="#7c3aed" opacity="0.75"/>
+      <rect x="180" y="90" width="28" height="28" fill="#ef4444" opacity="0.6"/>
+      <rect x="210" y="90" width="28" height="28" fill="#f59e0b" opacity="0.5"/>
+      
+      <!-- Row 5 -->
+      <rect x="0" y="120" width="28" height="28" fill="#f59e0b" opacity="0.4"/>
+      <rect x="30" y="120" width="28" height="28" fill="#ef4444" opacity="0.6"/>
+      <rect x="60" y="120" width="28" height="28" fill="#7c3aed" opacity="0.7"/>
+      <rect x="90" y="120" width="28" height="28" fill="#00d4ff" opacity="0.8"/>
+      <rect x="120" y="120" width="28" height="28" fill="#7c3aed" opacity="0.9"/>
+      <rect x="150" y="120" width="28" height="28" fill="#7c3aed" opacity="0.65"/>
+      <rect x="180" y="120" width="28" height="28" fill="#ef4444" opacity="0.5"/>
+      <rect x="210" y="120" width="28" height="28" fill="#f59e0b" opacity="0.4"/>
+      
+      <!-- Row 6 -->
+      <rect x="0" y="150" width="28" height="28" fill="#10b981" opacity="0.4"/>
+      <rect x="30" y="150" width="28" height="28" fill="#f59e0b" opacity="0.5"/>
+      <rect x="60" y="150" width="28" height="28" fill="#ef4444" opacity="0.55"/>
+      <rect x="90" y="150" width="28" height="28" fill="#7c3aed" opacity="0.7"/>
+      <rect x="120" y="150" width="28" height="28" fill="#7c3aed" opacity="0.65"/>
+      <rect x="150" y="150" width="28" height="28" fill="#ef4444" opacity="0.5"/>
+      <rect x="180" y="150" width="28" height="28" fill="#f59e0b" opacity="0.45"/>
+      <rect x="210" y="150" width="28" height="28" fill="#10b981" opacity="0.4"/>
+      
+      <!-- Row 7 -->
+      <rect x="0" y="180" width="28" height="28" fill="#10b981" opacity="0.35"/>
+      <rect x="30" y="180" width="28" height="28" fill="#10b981" opacity="0.45"/>
+      <rect x="60" y="180" width="28" height="28" fill="#f59e0b" opacity="0.4"/>
+      <rect x="90" y="180" width="28" height="28" fill="#f59e0b" opacity="0.5"/>
+      <rect x="120" y="180" width="28" height="28" fill="#f59e0b" opacity="0.45"/>
+      <rect x="150" y="180" width="28" height="28" fill="#f59e0b" opacity="0.4"/>
+      <rect x="180" y="180" width="28" height="28" fill="#10b981" opacity="0.4"/>
+      <rect x="210" y="180" width="28" height="28" fill="#10b981" opacity="0.3"/>
+      
+      <!-- Row 8 -->
+      <rect x="0" y="210" width="28" height="28" fill="#10b981" opacity="0.25"/>
+      <rect x="30" y="210" width="28" height="28" fill="#10b981" opacity="0.35"/>
+      <rect x="60" y="210" width="28" height="28" fill="#10b981" opacity="0.4"/>
+      <rect x="90" y="210" width="28" height="28" fill="#f59e0b" opacity="0.35"/>
+      <rect x="120" y="210" width="28" height="28" fill="#10b981" opacity="0.4"/>
+      <rect x="150" y="210" width="28" height="28" fill="#10b981" opacity="0.35"/>
+      <rect x="180" y="210" width="28" height="28" fill="#10b981" opacity="0.3"/>
+      <rect x="210" y="210" width="28" height="28" fill="#10b981" opacity="0.2"/>
+      
+      <!-- Grid overlay -->
+      <rect x="0" y="0" width="238" height="238" fill="none" stroke="#3b3b5c" stroke-width="1"/>
+    </g>
+    
+    <!-- Color scale legend -->
+    <g transform="translate(300, 70)">
+      <text x="0" y="0" font-family="'SF Mono', 'Fira Code', monospace" font-size="11" fill="#6b7280">Intensity Scale</text>
+      
+      <rect x="0" y="15" width="20" height="20" fill="#10b981" opacity="0.5"/>
+      <text x="30" y="30" font-family="'SF Mono', 'Fira Code', monospace" font-size="10" fill="#10b981">Low</text>
+      
+      <rect x="0" y="45" width="20" height="20" fill="#f59e0b" opacity="0.6"/>
+      <text x="30" y="60" font-family="'SF Mono', 'Fira Code', monospace" font-size="10" fill="#f59e0b">Medium</text>
+      
+      <rect x="0" y="75" width="20" height="20" fill="#ef4444" opacity="0.7"/>
+      <text x="30" y="90" font-family="'SF Mono', 'Fira Code', monospace" font-size="10" fill="#ef4444">High</text>
+      
+      <rect x="0" y="105" width="20" height="20" fill="#7c3aed" opacity="0.8"/>
+      <text x="30" y="120" font-family="'SF Mono', 'Fira Code', monospace" font-size="10" fill="#7c3aed">Peak</text>
+      
+      <rect x="0" y="135" width="20" height="20" fill="#00d4ff" opacity="0.9"/>
+      <text x="30" y="150" font-family="'SF Mono', 'Fira Code', monospace" font-size="10" fill="#00d4ff">Max</text>
+    </g>
+    
+    <!-- Description -->
+    <text x="300" y="250" font-family="'SF Mono', 'Fira Code', monospace" font-size="11" fill="#6b7280">Feature map from</text>
+    <text x="300" y="270" font-family="'SF Mono', 'Fira Code', monospace" font-size="11" fill="#6b7280">attention layers</text>
+    <text x="300" y="295" font-family="'SF Mono', 'Fira Code', monospace" font-size="10" fill="#9ca3af">Highlights wrinkle</text>
+    <text x="300" y="310" font-family="'SF Mono', 'Fira Code', monospace" font-size="10" fill="#9ca3af">concentration areas</text>
+  </g>
+  
+  <!-- Far Right: Material Buckets -->
+  <g transform="translate(1160, 130)">
+    <rect x="0" y="0" width="320" height="320" rx="8" fill="#1a1a2e" stroke="#f59e0b" stroke-width="2"/>
+    <rect x="0" y="0" width="320" height="40" rx="8" fill="#f59e0b" opacity="0.15"/>
+    <text x="20" y="27" font-family="'SF Mono', 'Fira Code', monospace" font-size="15" fill="#f59e0b" font-weight="600">MATERIAL BUCKETS</text>
+    
+    <!-- Material categories -->
+    <g transform="translate(20, 55)">
+      <rect x="0" y="0" width="120" height="35" rx="4" fill="#ef4444" opacity="0.2" stroke="#ef4444" stroke-width="1"/>
+      <text x="60" y="22" font-family="'SF Mono', 'Fira Code', monospace" font-size="11" fill="#ef4444" text-anchor="middle">STIFF</text>
+      
+      <rect x="130" y="0" width="160" height="35" rx="4" fill="#0d0d15"/>
+      <text x="140" y="16" font-family="'SF Mono', 'Fira Code', monospace" font-size="9" fill="#6b7280">denim, canvas</text>
+      <text x="140" y="28" font-family="'SF Mono', 'Fira Code', monospace" font-size="9" fill="#6b7280">leather, linen</text>
+    </g>
+    
+    <g transform="translate(20, 100)">
+      <rect x="0" y="0" width="120" height="35" rx="4" fill="#f59e0b" opacity="0.2" stroke="#f59e0b" stroke-width="1"/>
+      <text x="60" y="22" font-family="'SF Mono', 'Fira Code', monospace" font-size="11" fill="#f59e0b" text-anchor="middle">MEDIUM</text>
+      
+      <rect x="130" y="0" width="160" height="35" rx="4" fill="#0d0d15"/>
+      <text x="140" y="16" font-family="'SF Mono', 'Fira Code', monospace" font-size="9" fill="#6b7280">cotton, wool</text>
+      <text x="140" y="28" font-family="'SF Mono', 'Fira Code', monospace" font-size="9" fill="#6b7280">twill, poplin</text>
+    </g>
+    
+    <g transform="translate(20, 145)">
+      <rect x="0" y="0" width="120" height="35" rx="4" fill="#10b981" opacity="0.2" stroke="#10b981" stroke-width="1"/>
+      <text x="60" y="22" font-family="'SF Mono', 'Fira Code', monospace" font-size="11" fill="#10b981" text-anchor="middle">SOFT</text>
+      
+      <rect x="130" y="0" width="160" height="35" rx="4" fill="#0d0d15"/>
+      <text x="140" y="16" font-family="'SF Mono', 'Fira Code', monospace" font-size="9" fill="#6b7280">silk, jersey</text>
+      <text x="140" y="28" font-family="'SF Mono', 'Fira Code', monospace" font-size="9" fill="#6b7280">chiffon, satin</text>
+    </g>
+    
+    <line x1="20" y1="200" x2="300" y2="200" stroke="#2a2a3e" stroke-width="1"/>
+    
+    <!-- Thickness levels -->
+    <text x="20" y="225" font-family="'SF Mono', 'Fira Code', monospace" font-size="12" fill="#7c3aed">THICKNESS LEVELS:</text>
+    
+    <text x="20" y="250" font-family="'SF Mono', 'Fira Code', monospace" font-size="10" fill="#00d4ff">thin</text>
+    <text x="70" y="250" font-family="'SF Mono', 'Fira Code', monospace" font-size="10" fill="#6b7280">: 0-1mm (silk, chiffon)</text>
+    
+    <text x="20" y="270" font-family="'SF Mono', 'Fira Code', monospace" font-size="10" fill="#00d4ff">medium</text>
+    <text x="85" y="270" font-family="'SF Mono', 'Fira Code', monospace" font-size="10" fill="#6b7280">: 2-3mm (cotton, wool)</text>
+    
+    <text x="20" y="290" font-family="'SF Mono', 'Fira Code', monospace" font-size="10" fill="#00d4ff">thick</text>
+    <text x="70" y="290" font-family="'SF Mono', 'Fira Code', monospace" font-size="10" fill="#6b7280">: 4mm+ (denim, leather)</text>
+  </g>
+  
+  <!-- Bottom Output Panel -->
+  <g transform="translate(80, 480)">
+    <rect x="0" y="0" width="600" height="180" rx="8" fill="#1a1a2e" stroke="#00d4ff" stroke-width="2"/>
+    <rect x="0" y="0" width="600" height="40" rx="8" fill="#00d4ff" opacity="0.1"/>
+    <text x="20" y="27" font-family="'SF Mono', 'Fira Code', monospace" font-size="15" fill="#00d4ff" font-weight="600">OUTPUT PARAMETERS</text>
+    
+    <!-- JSON output -->
+    <text x="30" y="70" font-family="'SF Mono', 'Fira Code', monospace" font-size="12" fill="#6b7280">{</text>
+    
+    <text x="50" y="95" font-family="'SF Mono', 'Fira Code', monospace" font-size="12" fill="#7c3aed">"material_bucket"</text>
+    <text x="200" y="95" font-family="'SF Mono', 'Fira Code', monospace" font-size="12" fill="#6b7280">:</text>
+    <text x="215" y="95" font-family="'SF Mono', 'Fira Code', monospace" font-size="12" fill="#10b981">"cotton_medium"</text>
+    <text x="345" y="95" font-family="'SF Mono', 'Fira Code', monospace" font-size="12" fill="#6b7280">,</text>
+    
+    <text x="50" y="120" font-family="'SF Mono', 'Fira Code', monospace" font-size="12" fill="#7c3aed">"thickness_level"</text>
+    <text x="200" y="120" font-family="'SF Mono', 'Fira Code', monospace" font-size="12" fill="#6b7280">:</text>
+    <text x="215" y="120" font-family="'SF Mono', 'Fira Code', monospace" font-size="12" fill="#10b981">"medium"</text>
+    <text x="290" y="120" font-family="'SF Mono', 'Fira Code', monospace" font-size="12" fill="#6b7280">,</text>
+    <text x="310" y="120" font-family="'SF Mono', 'Fira Code', monospace" font-size="12" fill="#9ca3af">// 2-3mm</text>
+    
+    <text x="50" y="145" font-family="'SF Mono', 'Fira Code', monospace" font-size="12" fill="#7c3aed">"confidence"</text>
+    <text x="165" y="145" font-family="'SF Mono', 'Fira Code', monospace" font-size="12" fill="#6b7280">:</text>
+    <text x="180" y="145" font-family="'SF Mono', 'Fira Code', monospace" font-size="12" fill="#f59e0b">0.87</text>
+    <text x="230" y="145" font-family="'SF Mono', 'Fira Code', monospace" font-size="12" fill="#9ca3af">// (measured in PoC)</text>
+    
+    <text x="30" y="170" font-family="'SF Mono', 'Fira Code', monospace" font-size="12" fill="#6b7280">}</text>
+    
+    <!-- Right side notes -->
+    <line x1="420" y1="55" x2="420" y2="170" stroke="#2a2a3e" stroke-width="1"/>
+    
+    <text x="440" y="80" font-family="'SF Mono', 'Fira Code', monospace" font-size="11" fill="#6b7280">Used by:</text>
+    <text x="440" y="100" font-family="'SF Mono', 'Fira Code', monospace" font-size="11" fill="#00d4ff">→ Deformation Engine</text>
+    <text x="440" y="120" font-family="'SF Mono', 'Fira Code', monospace" font-size="11" fill="#00d4ff">→ Physics Simulation</text>
+    <text x="440" y="140" font-family="'SF Mono', 'Fira Code', monospace" font-size="11" fill="#00d4ff">→ CLO3D Import</text>
+  </g>
+  
+  <!-- Bottom Right: Technical Flow -->
+  <g transform="translate(720, 480)">
+    <rect x="0" y="0" width="500" height="180" rx="8" fill="#1a1a2e" stroke="#10b981" stroke-width="2"/>
+    <rect x="0" y="0" width="500" height="40" rx="8" fill="#10b981" opacity="0.15"/>
+    <text x="20" y="27" font-family="'SF Mono', 'Fira Code', monospace" font-size="15" fill="#10b981" font-weight="600">INFERENCE PIPELINE</text>
+    
+    <!-- Pipeline boxes -->
+    <g transform="translate(25, 60)">
+      <rect x="0" y="0" width="85" height="45" rx="4" fill="#2a2a3e" stroke="#7c3aed" stroke-width="1"/>
+      <text x="42" y="20" font-family="'SF Mono', 'Fira Code', monospace" font-size="9" fill="#7c3aed" text-anchor="middle">Masked</text>
+      <text x="42" y="35" font-family="'SF Mono', 'Fira Code', monospace" font-size="9" fill="#7c3aed" text-anchor="middle">Region</text>
+    </g>
+    
+    <text x="120" y="87" font-family="'SF Mono', 'Fira Code', monospace" font-size="14" fill="#6b7280">→</text>
+    
+    <g transform="translate(140, 60)">
+      <rect x="0" y="0" width="85" height="45" rx="4" fill="#2a2a3e" stroke="#f59e0b" stroke-width="1"/>
+      <text x="42" y="20" font-family="'SF Mono', 'Fira Code', monospace" font-size="9" fill="#f59e0b" text-anchor="middle">ViT/Swin</text>
+      <text x="42" y="35" font-family="'SF Mono', 'Fira Code', monospace" font-size="9" fill="#f59e0b" text-anchor="middle">Encoder</text>
+    </g>
+    
+    <text x="235" y="87" font-family="'SF Mono', 'Fira Code', monospace" font-size="14" fill="#6b7280">→</text>
+    
+    <g transform="translate(255, 60)">
+      <rect x="0" y="0" width="85" height="45" rx="4" fill="#2a2a3e" stroke="#00d4ff" stroke-width="1"/>
+      <text x="42" y="20" font-family="'SF Mono', 'Fira Code', monospace" font-size="9" fill="#00d4ff" text-anchor="middle">FFT</text>
+      <text x="42" y="35" font-family="'SF Mono', 'Fira Code', monospace" font-size="9" fill="#00d4ff" text-anchor="middle">Analysis</text>
+    </g>
+    
+    <text x="350" y="87" font-family="'SF Mono', 'Fira Code', monospace" font-size="14" fill="#6b7280">→</text>
+    
+    <g transform="translate(370, 60)">
+      <rect x="0" y="0" width="85" height="45" rx="4" fill="#2a2a3e" stroke="#10b981" stroke-width="1"/>
+      <text x="42" y="20" font-family="'SF Mono', 'Fira Code', monospace" font-size="9" fill="#10b981" text-anchor="middle">Material</text>
+      <text x="42" y="35" font-family="'SF Mono', 'Fira Code', monospace" font-size="9" fill="#10b981" text-anchor="middle">Classifier</text>
+    </g>
+    
+    <!-- Notes -->
+    <text x="25" y="135" font-family="'SF Mono', 'Fira Code', monospace" font-size="11" fill="#6b7280">Inference time: ~25ms per garment</text>
+    <text x="25" y="155" font-family="'SF Mono', 'Fira Code', monospace" font-size="11" fill="#6b7280">Training: 50K+ fabric samples with ground truth labels</text>
+  </g>
+  
+  <!-- Far Right: Physics Parameters -->
+  <g transform="translate(1260, 480)">
+    <rect x="0" y="0" width="220" height="180" rx="8" fill="#1a1a2e" stroke="#7c3aed" stroke-width="2"/>
+    <rect x="0" y="0" width="220" height="40" rx="8" fill="#7c3aed" opacity="0.2"/>
+    <text x="20" y="27" font-family="'SF Mono', 'Fira Code', monospace" font-size="14" fill="#7c3aed" font-weight="600">PHYSICS PARAMS</text>
+    
+    <text x="20" y="70" font-family="'SF Mono', 'Fira Code', monospace" font-size="11" fill="#00d4ff">stiffness</text>
+    <text x="100" y="70" font-family="'SF Mono', 'Fira Code', monospace" font-size="11" fill="#6b7280">: float</text>
+    
+    <text x="20" y="95" font-family="'SF Mono', 'Fira Code', monospace" font-size="11" fill="#00d4ff">bend_resist</text>
+    <text x="115" y="95" font-family="'SF Mono', 'Fira Code', monospace" font-size="11" fill="#6b7280">: float</text>
+    
+    <text x="20" y="120" font-family="'SF Mono', 'Fira Code', monospace" font-size="11" fill="#00d4ff">density</text>
+    <text x="90" y="120" font-family="'SF Mono', 'Fira Code', monospace" font-size="11" fill="#6b7280">: g/m²</text>
+    
+    <text x="20" y="145" font-family="'SF Mono', 'Fira Code', monospace" font-size="11" fill="#00d4ff">friction</text>
+    <text x="90" y="145" font-family="'SF Mono', 'Fira Code', monospace" font-size="11" fill="#6b7280">: float</text>
+    
+    <line x1="20" y1="155" x2="200" y2="155" stroke="#2a2a3e" stroke-width="1"/>
+    
+    <text x="20" y="172" font-family="'SF Mono', 'Fira Code', monospace" font-size="9" fill="#9ca3af">→ CLO3D preset mapping</text>
+  </g>
+</svg>

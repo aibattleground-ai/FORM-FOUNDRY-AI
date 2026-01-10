@@ -1,0 +1,250 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1800 840" width="1800" height="840">
+  <defs>
+    <linearGradient id="bgGrad5" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#0a0a0f"/>
+      <stop offset="100%" style="stop-color:#12121a"/>
+    </linearGradient>
+    <linearGradient id="cyanGrad5" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#00d4ff"/>
+      <stop offset="100%" style="stop-color:#0891b2"/>
+    </linearGradient>
+    <linearGradient id="greenGrad5" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#10b981"/>
+      <stop offset="100%" style="stop-color:#059669"/>
+    </linearGradient>
+    <linearGradient id="orangeGrad5" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#f59e0b"/>
+      <stop offset="100%" style="stop-color:#d97706"/>
+    </linearGradient>
+    <linearGradient id="purpleGrad5" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#7c3aed"/>
+      <stop offset="100%" style="stop-color:#5b21b6"/>
+    </linearGradient>
+    <filter id="glow5" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="4" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <filter id="loopGlow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="8" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <pattern id="grid5" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1e1e2e" stroke-width="0.5"/>
+    </pattern>
+  </defs>
+  
+  <rect width="1800" height="840" fill="url(#bgGrad5)"/>
+  <rect width="1800" height="840" fill="url(#grid5)" opacity="0.4"/>
+  
+  <text x="900" y="60" font-family="'SF Mono', 'Fira Code', monospace" font-size="28" fill="#00d4ff" text-anchor="middle" font-weight="600" filter="url(#glow5)">STEP 05: SYNTHETIC DATA FACTORY</text>
+  <text x="900" y="90" font-family="'SF Mono', 'Fira Code', monospace" font-size="14" fill="#6b7280" text-anchor="middle">Continuous Learning Loop Using CLO3D Physics Simulation</text>
+  
+  <!-- Central Circular Workflow -->
+  <g transform="translate(650, 400)">
+    <!-- Outer dashed circle - Continuous Learning Loop -->
+    <circle cx="0" cy="0" r="260" fill="none" stroke="#3b3b5c" stroke-width="2" stroke-dasharray="15,10" filter="url(#loopGlow)"/>
+    <text x="0" y="-290" font-family="'SF Mono', 'Fira Code', monospace" font-size="14" fill="#6b7280" text-anchor="middle">CONTINUOUS LEARNING LOOP</text>
+    
+    <!-- Inner glow circle -->
+    <circle cx="0" cy="0" r="200" fill="none" stroke="#00d4ff" stroke-width="1" opacity="0.2"/>
+    
+    <!-- Center label -->
+    <circle cx="0" cy="0" r="70" fill="#1a1a2e" stroke="#00d4ff" stroke-width="2"/>
+    <text x="0" y="-10" font-family="'SF Mono', 'Fira Code', monospace" font-size="12" fill="#00d4ff" text-anchor="middle" font-weight="600">SYNTHETIC</text>
+    <text x="0" y="10" font-family="'SF Mono', 'Fira Code', monospace" font-size="12" fill="#00d4ff" text-anchor="middle" font-weight="600">DATA</text>
+    <text x="0" y="30" font-family="'SF Mono', 'Fira Code', monospace" font-size="12" fill="#00d4ff" text-anchor="middle" font-weight="600">FACTORY</text>
+    
+    <!-- Node 1: CLO3D Simulation (Top) -->
+    <g transform="translate(0, -180)">
+      <rect x="-80" y="-35" width="160" height="70" rx="8" fill="#1a1a2e" stroke="#00d4ff" stroke-width="2"/>
+      <rect x="-80" y="-35" width="160" height="70" rx="8" fill="url(#cyanGrad5)" opacity="0.15"/>
+      <text x="0" y="-5" font-family="'SF Mono', 'Fira Code', monospace" font-size="13" fill="#00d4ff" text-anchor="middle" font-weight="600">CLO3D</text>
+      <text x="0" y="15" font-family="'SF Mono', 'Fira Code', monospace" font-size="13" fill="#00d4ff" text-anchor="middle" font-weight="600">SIMULATION</text>
+    </g>
+    
+    <!-- Node 2: Dataset Generation (Right) -->
+    <g transform="translate(180, 0)">
+      <rect x="-80" y="-35" width="160" height="70" rx="8" fill="#1a1a2e" stroke="#10b981" stroke-width="2"/>
+      <rect x="-80" y="-35" width="160" height="70" rx="8" fill="url(#greenGrad5)" opacity="0.15"/>
+      <text x="0" y="-5" font-family="'SF Mono', 'Fira Code', monospace" font-size="13" fill="#10b981" text-anchor="middle" font-weight="600">DATASET</text>
+      <text x="0" y="15" font-family="'SF Mono', 'Fira Code', monospace" font-size="13" fill="#10b981" text-anchor="middle" font-weight="600">GENERATION</text>
+    </g>
+    
+    <!-- Node 3: Training Models (Bottom) -->
+    <g transform="translate(0, 180)">
+      <rect x="-80" y="-35" width="160" height="70" rx="8" fill="#1a1a2e" stroke="#f59e0b" stroke-width="2"/>
+      <rect x="-80" y="-35" width="160" height="70" rx="8" fill="url(#orangeGrad5)" opacity="0.15"/>
+      <text x="0" y="-5" font-family="'SF Mono', 'Fira Code', monospace" font-size="13" fill="#f59e0b" text-anchor="middle" font-weight="600">TRAINING</text>
+      <text x="0" y="15" font-family="'SF Mono', 'Fira Code', monospace" font-size="13" fill="#f59e0b" text-anchor="middle" font-weight="600">MODELS</text>
+    </g>
+    
+    <!-- Node 4: Deploy & PoC (Left) -->
+    <g transform="translate(-180, 0)">
+      <rect x="-80" y="-35" width="160" height="70" rx="8" fill="#1a1a2e" stroke="#7c3aed" stroke-width="2"/>
+      <rect x="-80" y="-35" width="160" height="70" rx="8" fill="url(#purpleGrad5)" opacity="0.15"/>
+      <text x="0" y="-5" font-family="'SF Mono', 'Fira Code', monospace" font-size="13" fill="#7c3aed" text-anchor="middle" font-weight="600">DEPLOY</text>
+      <text x="0" y="15" font-family="'SF Mono', 'Fira Code', monospace" font-size="13" fill="#7c3aed" text-anchor="middle" font-weight="600">&amp; PoC</text>
+    </g>
+    
+    <!-- Curved arrows connecting nodes -->
+    <!-- Top to Right -->
+    <path d="M60,-145 Q140,-140 145,-60" stroke="#00d4ff" stroke-width="3" fill="none" marker-end="url(#arrowCyan)"/>
+    <polygon points="145,-60 155,-55 150,-45" fill="#00d4ff"/>
+    
+    <!-- Right to Bottom -->
+    <path d="M145,60 Q140,140 60,145" stroke="#10b981" stroke-width="3" fill="none"/>
+    <polygon points="60,145 55,155 45,150" fill="#10b981"/>
+    
+    <!-- Bottom to Left -->
+    <path d="M-60,145 Q-140,140 -145,60" stroke="#f59e0b" stroke-width="3" fill="none"/>
+    <polygon points="-145,60 -155,55 -150,45" fill="#f59e0b"/>
+    
+    <!-- Left to Top -->
+    <path d="M-145,-60 Q-140,-140 -60,-145" stroke="#7c3aed" stroke-width="3" fill="none"/>
+    <polygon points="-60,-145 -55,-155 -45,-150" fill="#7c3aed"/>
+    
+    <!-- Step labels on arrows -->
+    <text x="120" y="-100" font-family="'SF Mono', 'Fira Code', monospace" font-size="9" fill="#6b7280">1</text>
+    <text x="120" y="110" font-family="'SF Mono', 'Fira Code', monospace" font-size="9" fill="#6b7280">2</text>
+    <text x="-120" y="110" font-family="'SF Mono', 'Fira Code', monospace" font-size="9" fill="#6b7280">3</text>
+    <text x="-120" y="-100" font-family="'SF Mono', 'Fira Code', monospace" font-size="9" fill="#6b7280">4</text>
+  </g>
+  
+  <!-- Right Panel: Why It Matters -->
+  <g transform="translate(1080, 130)">
+    <rect x="0" y="0" width="380" height="380" rx="8" fill="#1a1a2e" stroke="#10b981" stroke-width="2"/>
+    <rect x="0" y="0" width="380" height="45" rx="8" fill="#10b981" opacity="0.15"/>
+    <text x="20" y="30" font-family="'SF Mono', 'Fira Code', monospace" font-size="16" fill="#10b981" font-weight="600">WHY IT MATTERS</text>
+    
+    <!-- Benefits list -->
+    <g transform="translate(20, 65)">
+      <text x="0" y="0" font-family="'SF Mono', 'Fira Code', monospace" font-size="14" fill="#10b981">✓</text>
+      <text x="25" y="0" font-family="'SF Mono', 'Fira Code', monospace" font-size="13" fill="#fff">Solves early data scarcity</text>
+      <text x="25" y="20" font-family="'SF Mono', 'Fira Code', monospace" font-size="10" fill="#6b7280">No need for expensive real captures</text>
+    </g>
+    
+    <g transform="translate(20, 115)">
+      <text x="0" y="0" font-family="'SF Mono', 'Fira Code', monospace" font-size="14" fill="#10b981">✓</text>
+      <text x="25" y="0" font-family="'SF Mono', 'Fira Code', monospace" font-size="13" fill="#fff">Structured (material, fit) pairs</text>
+      <text x="25" y="20" font-family="'SF Mono', 'Fira Code', monospace" font-size="10" fill="#6b7280">Perfect labels from simulation</text>
+    </g>
+    
+    <g transform="translate(20, 165)">
+      <text x="0" y="0" font-family="'SF Mono', 'Fira Code', monospace" font-size="14" fill="#10b981">✓</text>
+      <text x="25" y="0" font-family="'SF Mono', 'Fira Code', monospace" font-size="13" fill="#fff">Ground truth from physics</text>
+      <text x="25" y="20" font-family="'SF Mono', 'Fira Code', monospace" font-size="10" fill="#6b7280">Accurate deformation data</text>
+    </g>
+    
+    <g transform="translate(20, 215)">
+      <text x="0" y="0" font-family="'SF Mono', 'Fira Code', monospace" font-size="14" fill="#10b981">✓</text>
+      <text x="25" y="0" font-family="'SF Mono', 'Fira Code', monospace" font-size="13" fill="#fff">Supports Deformation Engine</text>
+      <text x="25" y="20" font-family="'SF Mono', 'Fira Code', monospace" font-size="10" fill="#6b7280">Training data for neural surrogate</text>
+    </g>
+    
+    <g transform="translate(20, 265)">
+      <text x="0" y="0" font-family="'SF Mono', 'Fira Code', monospace" font-size="14" fill="#10b981">✓</text>
+      <text x="25" y="0" font-family="'SF Mono', 'Fira Code', monospace" font-size="13" fill="#fff">PoC feedback → refine loop</text>
+      <text x="25" y="20" font-family="'SF Mono', 'Fira Code', monospace" font-size="10" fill="#6b7280">Continuous improvement cycle</text>
+    </g>
+    
+    <line x1="20" y1="310" x2="360" y2="310" stroke="#2a2a3e" stroke-width="1"/>
+    
+    <!-- Competitive Moat -->
+    <text x="20" y="340" font-family="'SF Mono', 'Fira Code', monospace" font-size="14" fill="#f59e0b" font-weight="600">COMPETITIVE MOAT</text>
+    <text x="20" y="365" font-family="'SF Mono', 'Fira Code', monospace" font-size="12" fill="#9ca3af">Replication = High barrier</text>
+  </g>
+  
+  <!-- Bottom Left: Data Flow Details -->
+  <g transform="translate(80, 560)">
+    <rect x="0" y="0" width="450" height="200" rx="8" fill="#1a1a2e" stroke="#00d4ff" stroke-width="2"/>
+    <rect x="0" y="0" width="450" height="40" rx="8" fill="#00d4ff" opacity="0.1"/>
+    <text x="20" y="27" font-family="'SF Mono', 'Fira Code', monospace" font-size="15" fill="#00d4ff" font-weight="600">CLO3D SIMULATION OUTPUTS</text>
+    
+    <text x="20" y="70" font-family="'SF Mono', 'Fira Code', monospace" font-size="12" fill="#7c3aed">Per simulation run:</text>
+    
+    <text x="20" y="100" font-family="'SF Mono', 'Fira Code', monospace" font-size="11" fill="#00d4ff">→</text>
+    <text x="40" y="100" font-family="'SF Mono', 'Fira Code', monospace" font-size="11" fill="#9ca3af">Draped mesh (.obj)</text>
+    
+    <text x="20" y="125" font-family="'SF Mono', 'Fira Code', monospace" font-size="11" fill="#00d4ff">→</text>
+    <text x="40" y="125" font-family="'SF Mono', 'Fira Code', monospace" font-size="11" fill="#9ca3af">Material parameters (stiffness, bend, etc.)</text>
+    
+    <text x="20" y="150" font-family="'SF Mono', 'Fira Code', monospace" font-size="11" fill="#00d4ff">→</text>
+    <text x="40" y="150" font-family="'SF Mono', 'Fira Code', monospace" font-size="11" fill="#9ca3af">Body pose &amp; shape (SMPL-X compatible)</text>
+    
+    <text x="20" y="175" font-family="'SF Mono', 'Fira Code', monospace" font-size="11" fill="#00d4ff">→</text>
+    <text x="40" y="175" font-family="'SF Mono', 'Fira Code', monospace" font-size="11" fill="#9ca3af">Fit labels (tight/loose/ideal)</text>
+  </g>
+  
+  <!-- Bottom Center: Scale Metrics -->
+  <g transform="translate(560, 560)">
+    <rect x="0" y="0" width="350" height="200" rx="8" fill="#1a1a2e" stroke="#f59e0b" stroke-width="2"/>
+    <rect x="0" y="0" width="350" height="40" rx="8" fill="#f59e0b" opacity="0.15"/>
+    <text x="20" y="27" font-family="'SF Mono', 'Fira Code', monospace" font-size="15" fill="#f59e0b" font-weight="600">SCALE TARGETS</text>
+    
+    <text x="20" y="70" font-family="'SF Mono', 'Fira Code', monospace" font-size="12" fill="#00d4ff">Body variations</text>
+    <text x="180" y="70" font-family="'SF Mono', 'Fira Code', monospace" font-size="12" fill="#fff">: 1,000+</text>
+    
+    <text x="20" y="100" font-family="'SF Mono', 'Fira Code', monospace" font-size="12" fill="#00d4ff">Garment types</text>
+    <text x="180" y="100" font-family="'SF Mono', 'Fira Code', monospace" font-size="12" fill="#fff">: 50+</text>
+    
+    <text x="20" y="130" font-family="'SF Mono', 'Fira Code', monospace" font-size="12" fill="#00d4ff">Material presets</text>
+    <text x="180" y="130" font-family="'SF Mono', 'Fira Code', monospace" font-size="12" fill="#fff">: 30+</text>
+    
+    <text x="20" y="160" font-family="'SF Mono', 'Fira Code', monospace" font-size="12" fill="#00d4ff">Total samples</text>
+    <text x="180" y="160" font-family="'SF Mono', 'Fira Code', monospace" font-size="12" fill="#fff">: 100K+</text>
+    
+    <line x1="20" y1="175" x2="330" y2="175" stroke="#2a2a3e" stroke-width="1"/>
+    
+    <text x="20" y="193" font-family="'SF Mono', 'Fira Code', monospace" font-size="10" fill="#6b7280">Generated via automated pipeline</text>
+  </g>
+  
+  <!-- Bottom Right: Flywheel Effect -->
+  <g transform="translate(940, 560)">
+    <rect x="0" y="0" width="420" height="200" rx="8" fill="#1a1a2e" stroke="#7c3aed" stroke-width="2"/>
+    <rect x="0" y="0" width="420" height="40" rx="8" fill="#7c3aed" opacity="0.2"/>
+    <text x="20" y="27" font-family="'SF Mono', 'Fira Code', monospace" font-size="15" fill="#7c3aed" font-weight="600">FLYWHEEL EFFECT</text>
+    
+    <!-- Mini flywheel diagram -->
+    <g transform="translate(80, 120)">
+      <circle cx="0" cy="0" r="50" fill="none" stroke="#7c3aed" stroke-width="1" stroke-dasharray="5,3"/>
+      
+      <circle cx="0" cy="-40" r="15" fill="#00d4ff" opacity="0.3"/>
+      <text x="0" y="-37" font-family="'SF Mono', 'Fira Code', monospace" font-size="8" fill="#00d4ff" text-anchor="middle">More</text>
+      <text x="0" y="-27" font-family="'SF Mono', 'Fira Code', monospace" font-size="8" fill="#00d4ff" text-anchor="middle">Data</text>
+      
+      <circle cx="40" cy="0" r="15" fill="#10b981" opacity="0.3"/>
+      <text x="40" y="-3" font-family="'SF Mono', 'Fira Code', monospace" font-size="8" fill="#10b981" text-anchor="middle">Better</text>
+      <text x="40" y="7" font-family="'SF Mono', 'Fira Code', monospace" font-size="8" fill="#10b981" text-anchor="middle">Models</text>
+      
+      <circle cx="0" cy="40" r="15" fill="#f59e0b" opacity="0.3"/>
+      <text x="0" y="37" font-family="'SF Mono', 'Fira Code', monospace" font-size="8" fill="#f59e0b" text-anchor="middle">Better</text>
+      <text x="0" y="47" font-family="'SF Mono', 'Fira Code', monospace" font-size="8" fill="#f59e0b" text-anchor="middle">Fitting</text>
+      
+      <circle cx="-40" cy="0" r="15" fill="#7c3aed" opacity="0.3"/>
+      <text x="-40" y="-3" font-family="'SF Mono', 'Fira Code', monospace" font-size="8" fill="#7c3aed" text-anchor="middle">More</text>
+      <text x="-40" y="7" font-family="'SF Mono', 'Fira Code', monospace" font-size="8" fill="#7c3aed" text-anchor="middle">Users</text>
+      
+      <!-- Arrows -->
+      <path d="M15,-35 Q35,-25 35,-15" stroke="#6b7280" stroke-width="1" fill="none"/>
+      <path d="M35,15 Q25,35 15,35" stroke="#6b7280" stroke-width="1" fill="none"/>
+      <path d="M-15,35 Q-35,25 -35,15" stroke="#6b7280" stroke-width="1" fill="none"/>
+      <path d="M-35,-15 Q-25,-35 -15,-35" stroke="#6b7280" stroke-width="1" fill="none"/>
+    </g>
+    
+    <!-- Description -->
+    <text x="180" y="80" font-family="'SF Mono', 'Fira Code', monospace" font-size="11" fill="#9ca3af">Each iteration improves:</text>
+    <text x="180" y="100" font-family="'SF Mono', 'Fira Code', monospace" font-size="10" fill="#6b7280">• Model accuracy</text>
+    <text x="180" y="118" font-family="'SF Mono', 'Fira Code', monospace" font-size="10" fill="#6b7280">• Coverage diversity</text>
+    <text x="180" y="136" font-family="'SF Mono', 'Fira Code', monospace" font-size="10" fill="#6b7280">• Edge case handling</text>
+    
+    <line x1="180" y1="155" x2="400" y2="155" stroke="#2a2a3e" stroke-width="1"/>
+    
+    <text x="180" y="175" font-family="'SF Mono', 'Fira Code', monospace" font-size="10" fill="#10b981">Data moat compounds over time</text>
+  </g>
+</svg>

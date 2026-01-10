@@ -1,0 +1,202 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1800 840" width="1800" height="840">
+  <defs>
+    <!-- Gradients -->
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#0a0a0f"/>
+      <stop offset="100%" style="stop-color:#12121a"/>
+    </linearGradient>
+    <linearGradient id="cyanGlow" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#00d4ff;stop-opacity:0"/>
+      <stop offset="50%" style="stop-color:#00d4ff;stop-opacity:0.6"/>
+      <stop offset="100%" style="stop-color:#00d4ff;stop-opacity:0"/>
+    </linearGradient>
+    <linearGradient id="purpleGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#7c3aed"/>
+      <stop offset="100%" style="stop-color:#5b21b6"/>
+    </linearGradient>
+    <linearGradient id="cyanGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#00d4ff"/>
+      <stop offset="100%" style="stop-color:#0891b2"/>
+    </linearGradient>
+    <!-- Filters -->
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <filter id="softGlow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="8" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <!-- Grid pattern -->
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1e1e2e" stroke-width="0.5"/>
+    </pattern>
+  </defs>
+  
+  <!-- Background -->
+  <rect width="1800" height="840" fill="url(#bgGrad)"/>
+  <rect width="1800" height="840" fill="url(#grid)" opacity="0.4"/>
+  
+  <!-- Title -->
+  <text x="900" y="60" font-family="'SF Mono', 'Fira Code', monospace" font-size="28" fill="#00d4ff" text-anchor="middle" font-weight="600" filter="url(#glow)">STEP 01: PnP CALIBRATION</text>
+  <text x="900" y="90" font-family="'SF Mono', 'Fira Code', monospace" font-size="14" fill="#6b7280" text-anchor="middle">Camera-to-World Scale Calibration Using Reference Object</text>
+  
+  <!-- Camera Assembly (Left) -->
+  <g transform="translate(180, 320)">
+    <!-- Camera body -->
+    <rect x="0" y="0" width="180" height="120" rx="8" fill="#1a1a2e" stroke="#00d4ff" stroke-width="2"/>
+    <rect x="10" y="10" width="160" height="100" rx="4" fill="#0d0d15"/>
+    
+    <!-- Lens -->
+    <circle cx="90" cy="60" r="40" fill="#0d0d15" stroke="#7c3aed" stroke-width="3"/>
+    <circle cx="90" cy="60" r="30" fill="#12121a" stroke="#5b21b6" stroke-width="2"/>
+    <circle cx="90" cy="60" r="18" fill="#1a1a2e"/>
+    <circle cx="90" cy="60" r="10" fill="#00d4ff" opacity="0.3"/>
+    <circle cx="90" cy="60" r="4" fill="#00d4ff" filter="url(#glow)"/>
+    
+    <!-- Camera details -->
+    <rect x="140" y="20" width="25" height="15" rx="2" fill="#7c3aed" opacity="0.6"/>
+    <circle cx="152" cy="27" r="4" fill="#00d4ff" filter="url(#glow)"/>
+    
+    <!-- Label -->
+    <text x="90" y="150" font-family="'SF Mono', 'Fira Code', monospace" font-size="14" fill="#00d4ff" text-anchor="middle" font-weight="500">RGB CAMERA</text>
+    <text x="90" y="170" font-family="'SF Mono', 'Fira Code', monospace" font-size="11" fill="#6b7280" text-anchor="middle">intrinsic matrix K</text>
+  </g>
+  
+  <!-- Projection Lines (Camera to Reference Plane) -->
+  <g opacity="0.8">
+    <!-- Main sight line -->
+    <line x1="450" y1="380" x2="950" y2="340" stroke="url(#cyanGlow)" stroke-width="3" stroke-dasharray="12,6"/>
+    <line x1="450" y1="380" x2="950" y2="440" stroke="url(#cyanGlow)" stroke-width="3" stroke-dasharray="12,6"/>
+    
+    <!-- Corner projection lines -->
+    <line x1="450" y1="380" x2="1020" y2="280" stroke="#00d4ff" stroke-width="1.5" stroke-dasharray="8,4" opacity="0.5"/>
+    <line x1="450" y1="380" x2="1280" y2="300" stroke="#00d4ff" stroke-width="1.5" stroke-dasharray="8,4" opacity="0.5"/>
+    <line x1="450" y1="380" x2="1020" y2="500" stroke="#00d4ff" stroke-width="1.5" stroke-dasharray="8,4" opacity="0.5"/>
+    <line x1="450" y1="380" x2="1280" y2="520" stroke="#00d4ff" stroke-width="1.5" stroke-dasharray="8,4" opacity="0.5"/>
+  </g>
+  
+  <!-- Focal point indicator -->
+  <circle cx="450" cy="380" r="8" fill="#00d4ff" filter="url(#glow)"/>
+  <circle cx="450" cy="380" r="4" fill="#fff"/>
+  
+  <!-- Center label for projection -->
+  <g transform="translate(620, 350)">
+    <rect x="0" y="0" width="200" height="60" rx="6" fill="#1a1a2e" stroke="#3b3b5c" stroke-width="1" opacity="0.9"/>
+    <text x="100" y="25" font-family="'SF Mono', 'Fira Code', monospace" font-size="12" fill="#7c3aed" text-anchor="middle" font-weight="500">PROJECTION</text>
+    <text x="100" y="45" font-family="'SF Mono', 'Fira Code', monospace" font-size="11" fill="#6b7280" text-anchor="middle">3D → 2D Mapping</text>
+  </g>
+  
+  <!-- A4 Reference Plane (Right - with perspective) -->
+  <g transform="translate(1000, 250)">
+    <!-- Paper shadow -->
+    <polygon points="30,30 310,50 290,290 10,270" fill="#000" opacity="0.3"/>
+    
+    <!-- A4 Paper -->
+    <polygon points="20,20 300,40 280,280 0,260" fill="#1a1a2e" stroke="#10b981" stroke-width="2"/>
+    
+    <!-- Grid on paper -->
+    <line x1="60" y1="60" x2="240" y2="75" stroke="#2a2a3e" stroke-width="1"/>
+    <line x1="50" y1="120" x2="250" y2="135" stroke="#2a2a3e" stroke-width="1"/>
+    <line x1="40" y1="180" x2="260" y2="195" stroke="#2a2a3e" stroke-width="1"/>
+    <line x1="100" y1="30" x2="80" y2="250" stroke="#2a2a3e" stroke-width="1"/>
+    <line x1="200" y1="35" x2="180" y2="265" stroke="#2a2a3e" stroke-width="1"/>
+    
+    <!-- Corner points with labels -->
+    <!-- P1 - Top Left -->
+    <circle cx="20" cy="20" r="8" fill="#f59e0b" filter="url(#glow)"/>
+    <text x="0" y="5" font-family="'SF Mono', 'Fira Code', monospace" font-size="12" fill="#f59e0b" font-weight="600">P1</text>
+    
+    <!-- P2 - Top Right -->
+    <circle cx="300" cy="40" r="8" fill="#f59e0b" filter="url(#glow)"/>
+    <text x="310" y="35" font-family="'SF Mono', 'Fira Code', monospace" font-size="12" fill="#f59e0b" font-weight="600">P2</text>
+    
+    <!-- P3 - Bottom Right -->
+    <circle cx="280" cy="280" r="8" fill="#f59e0b" filter="url(#glow)"/>
+    <text x="295" y="290" font-family="'SF Mono', 'Fira Code', monospace" font-size="12" fill="#f59e0b" font-weight="600">P3</text>
+    
+    <!-- P4 - Bottom Left -->
+    <circle cx="0" cy="260" r="8" fill="#f59e0b" filter="url(#glow)"/>
+    <text x="-25" y="270" font-family="'SF Mono', 'Fira Code', monospace" font-size="12" fill="#f59e0b" font-weight="600">P4</text>
+    
+    <!-- Dimension labels -->
+    <text x="150" y="15" font-family="'SF Mono', 'Fira Code', monospace" font-size="13" fill="#10b981" text-anchor="middle" font-weight="500">210 mm</text>
+    <text x="320" y="170" font-family="'SF Mono', 'Fira Code', monospace" font-size="13" fill="#10b981" font-weight="500">297 mm</text>
+    
+    <!-- A4 Label -->
+    <text x="140" y="320" font-family="'SF Mono', 'Fira Code', monospace" font-size="14" fill="#10b981" text-anchor="middle" font-weight="500">A4 REFERENCE PLANE</text>
+    <text x="140" y="340" font-family="'SF Mono', 'Fira Code', monospace" font-size="11" fill="#6b7280" text-anchor="middle">Known World Coordinates</text>
+  </g>
+  
+  <!-- Algorithm Info Box (Bottom Left) -->
+  <g transform="translate(100, 620)">
+    <rect x="0" y="0" width="380" height="160" rx="8" fill="#1a1a2e" stroke="#7c3aed" stroke-width="2"/>
+    <rect x="0" y="0" width="380" height="35" rx="8" fill="url(#purpleGrad)" opacity="0.3"/>
+    <text x="20" y="24" font-family="'SF Mono', 'Fira Code', monospace" font-size="14" fill="#7c3aed" font-weight="600">ALGORITHM</text>
+    
+    <text x="20" y="60" font-family="'SF Mono', 'Fira Code', monospace" font-size="13" fill="#00d4ff">cv2.solvePnP()</text>
+    <text x="20" y="85" font-family="'SF Mono', 'Fira Code', monospace" font-size="11" fill="#6b7280">Perspective-n-Point solver</text>
+    
+    <line x1="20" y1="100" x2="360" y2="100" stroke="#2a2a3e" stroke-width="1"/>
+    
+    <text x="20" y="125" font-family="'SF Mono', 'Fira Code', monospace" font-size="12" fill="#f59e0b">INPUT:</text>
+    <text x="90" y="125" font-family="'SF Mono', 'Fira Code', monospace" font-size="11" fill="#9ca3af">4 corner points (P1-P4)</text>
+    <text x="20" y="145" font-family="'SF Mono', 'Fira Code', monospace" font-size="12" fill="#f59e0b">REF:</text>
+    <text x="90" y="145" font-family="'SF Mono', 'Fira Code', monospace" font-size="11" fill="#9ca3af">210×297mm A4 dimensions</text>
+  </g>
+  
+  <!-- Output Info Box (Bottom Center) -->
+  <g transform="translate(520, 620)">
+    <rect x="0" y="0" width="380" height="160" rx="8" fill="#1a1a2e" stroke="#10b981" stroke-width="2"/>
+    <rect x="0" y="0" width="380" height="35" rx="8" fill="#10b981" opacity="0.15"/>
+    <text x="20" y="24" font-family="'SF Mono', 'Fira Code', monospace" font-size="14" fill="#10b981" font-weight="600">OUTPUT</text>
+    
+    <text x="20" y="60" font-family="'SF Mono', 'Fira Code', monospace" font-size="12" fill="#00d4ff">scale_factor</text>
+    <text x="150" y="60" font-family="'SF Mono', 'Fira Code', monospace" font-size="11" fill="#6b7280">: float (px/mm)</text>
+    
+    <text x="20" y="85" font-family="'SF Mono', 'Fira Code', monospace" font-size="12" fill="#00d4ff">camera_pose</text>
+    <text x="150" y="85" font-family="'SF Mono', 'Fira Code', monospace" font-size="11" fill="#6b7280">: [R|t] matrix</text>
+    
+    <text x="20" y="110" font-family="'SF Mono', 'Fira Code', monospace" font-size="12" fill="#00d4ff">intrinsics</text>
+    <text x="150" y="110" font-family="'SF Mono', 'Fira Code', monospace" font-size="11" fill="#6b7280">: 3×3 matrix K</text>
+    
+    <line x1="20" y1="125" x2="360" y2="125" stroke="#2a2a3e" stroke-width="1"/>
+    
+    <text x="20" y="145" font-family="'SF Mono', 'Fira Code', monospace" font-size="11" fill="#9ca3af">→ Converts pixel measurements to mm</text>
+  </g>
+  
+  <!-- Formula Box (Bottom Right) -->
+  <g transform="translate(940, 620)">
+    <rect x="0" y="0" width="380" height="160" rx="8" fill="#1a1a2e" stroke="#00d4ff" stroke-width="2"/>
+    <rect x="0" y="0" width="380" height="35" rx="8" fill="#00d4ff" opacity="0.1"/>
+    <text x="20" y="24" font-family="'SF Mono', 'Fira Code', monospace" font-size="14" fill="#00d4ff" font-weight="600">PROJECTION MODEL</text>
+    
+    <text x="20" y="65" font-family="'SF Mono', 'Fira Code', monospace" font-size="14" fill="#fff">s · [u, v, 1]ᵀ = K · [R|t] · [X, Y, Z, 1]ᵀ</text>
+    
+    <text x="20" y="100" font-family="'SF Mono', 'Fira Code', monospace" font-size="11" fill="#7c3aed">s</text>
+    <text x="40" y="100" font-family="'SF Mono', 'Fira Code', monospace" font-size="11" fill="#6b7280">= scale factor</text>
+    
+    <text x="20" y="120" font-family="'SF Mono', 'Fira Code', monospace" font-size="11" fill="#7c3aed">K</text>
+    <text x="40" y="120" font-family="'SF Mono', 'Fira Code', monospace" font-size="11" fill="#6b7280">= camera intrinsic matrix</text>
+    
+    <text x="20" y="140" font-family="'SF Mono', 'Fira Code', monospace" font-size="11" fill="#7c3aed">[R|t]</text>
+    <text x="60" y="140" font-family="'SF Mono', 'Fira Code', monospace" font-size="11" fill="#6b7280">= extrinsic (rotation + translation)</text>
+  </g>
+  
+  <!-- Coordinate system indicator -->
+  <g transform="translate(1550, 150)">
+    <line x1="0" y1="60" x2="60" y2="60" stroke="#f59e0b" stroke-width="2" marker-end="url(#arrowOrange)"/>
+    <line x1="0" y1="60" x2="0" y2="0" stroke="#10b981" stroke-width="2"/>
+    <line x1="0" y1="60" x2="30" y2="90" stroke="#7c3aed" stroke-width="2"/>
+    <text x="70" y="65" font-family="'SF Mono', 'Fira Code', monospace" font-size="11" fill="#f59e0b">X</text>
+    <text x="-5" y="-10" font-family="'SF Mono', 'Fira Code', monospace" font-size="11" fill="#10b981">Y</text>
+    <text x="35" y="100" font-family="'SF Mono', 'Fira Code', monospace" font-size="11" fill="#7c3aed">Z</text>
+    <text x="0" y="120" font-family="'SF Mono', 'Fira Code', monospace" font-size="10" fill="#6b7280" text-anchor="middle">World Coords</text>
+  </g>
+</svg>

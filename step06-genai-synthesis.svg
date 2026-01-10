@@ -1,0 +1,324 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1800 840" width="1800" height="840">
+  <defs>
+    <linearGradient id="bgGrad6" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#0a0a0f"/>
+      <stop offset="100%" style="stop-color:#12121a"/>
+    </linearGradient>
+    <linearGradient id="controlnetGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#7c3aed"/>
+      <stop offset="50%" style="stop-color:#f59e0b"/>
+      <stop offset="100%" style="stop-color:#7c3aed"/>
+    </linearGradient>
+    <linearGradient id="depthGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#ffffff"/>
+      <stop offset="100%" style="stop-color:#1a1a2e"/>
+    </linearGradient>
+    <filter id="glow6" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="4" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <filter id="photoGlow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="10" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <pattern id="grid6" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1e1e2e" stroke-width="0.5"/>
+    </pattern>
+    <clipPath id="edgeClip">
+      <rect x="0" y="0" width="160" height="120" rx="4"/>
+    </clipPath>
+    <clipPath id="depthClip">
+      <rect x="0" y="0" width="160" height="120" rx="4"/>
+    </clipPath>
+  </defs>
+  
+  <rect width="1800" height="840" fill="url(#bgGrad6)"/>
+  <rect width="1800" height="840" fill="url(#grid6)" opacity="0.4"/>
+  
+  <text x="900" y="60" font-family="'SF Mono', 'Fira Code', monospace" font-size="28" fill="#00d4ff" text-anchor="middle" font-weight="600" filter="url(#glow6)">STEP 06: GenAI SYNTHESIS</text>
+  <text x="900" y="90" font-family="'SF Mono', 'Fira Code', monospace" font-size="14" fill="#6b7280" text-anchor="middle">SDXL + ControlNet: 3D Mesh to Photorealistic Image Conversion</text>
+  
+  <!-- Left Panel: Inputs from 3D -->
+  <g transform="translate(80, 130)">
+    <rect x="0" y="0" width="420" height="420" rx="8" fill="#1a1a2e" stroke="#7c3aed" stroke-width="2"/>
+    <rect x="0" y="0" width="420" height="45" rx="8" fill="#7c3aed" opacity="0.2"/>
+    <text x="20" y="30" font-family="'SF Mono', 'Fira Code', monospace" font-size="16" fill="#7c3aed" font-weight="600">INPUTS FROM 3D</text>
+    
+    <!-- Input list -->
+    <text x="20" y="75" font-family="'SF Mono', 'Fira Code', monospace" font-size="12" fill="#00d4ff">•</text>
+    <text x="35" y="75" font-family="'SF Mono', 'Fira Code', monospace" font-size="12" fill="#fff">draped_mesh</text>
+    <text x="150" y="75" font-family="'SF Mono', 'Fira Code', monospace" font-size="11" fill="#6b7280">(.obj from CLO3D)</text>
+    
+    <text x="20" y="100" font-family="'SF Mono', 'Fira Code', monospace" font-size="12" fill="#00d4ff">•</text>
+    <text x="35" y="100" font-family="'SF Mono', 'Fira Code', monospace" font-size="12" fill="#fff">canny_edge</text>
+    <text x="135" y="100" font-family="'SF Mono', 'Fira Code', monospace" font-size="11" fill="#6b7280">(contour extraction)</text>
+    
+    <text x="20" y="125" font-family="'SF Mono', 'Fira Code', monospace" font-size="12" fill="#00d4ff">•</text>
+    <text x="35" y="125" font-family="'SF Mono', 'Fira Code', monospace" font-size="12" fill="#fff">depth_map</text>
+    <text x="130" y="125" font-family="'SF Mono', 'Fira Code', monospace" font-size="11" fill="#6b7280">(z-buffer render)</text>
+    
+    <!-- Prompt box -->
+    <rect x="20" y="145" width="380" height="50" rx="4" fill="#0d0d15" stroke="#f59e0b" stroke-width="1"/>
+    <text x="30" y="165" font-family="'SF Mono', 'Fira Code', monospace" font-size="10" fill="#f59e0b">prompt:</text>
+    <text x="30" y="183" font-family="'SF Mono', 'Fira Code', monospace" font-size="9" fill="#9ca3af">"photorealistic fashion photography, studio lighting, high quality"</text>
+    
+    <!-- Edge Map Preview -->
+    <g transform="translate(30, 215)">
+      <text x="0" y="-10" font-family="'SF Mono', 'Fira Code', monospace" font-size="11" fill="#6b7280">Edge Map (Canny)</text>
+      <rect x="0" y="0" width="160" height="120" rx="4" fill="#0d0d15" stroke="#3b3b5c" stroke-width="1"/>
+      
+      <!-- Simplified edge silhouette -->
+      <g transform="translate(80, 60)">
+        <!-- Head outline -->
+        <ellipse cx="0" cy="-40" rx="18" ry="22" fill="none" stroke="#00d4ff" stroke-width="1.5"/>
+        <!-- Shoulders -->
+        <path d="M-18,-18 Q-40,-15 -50,10" fill="none" stroke="#00d4ff" stroke-width="1.5"/>
+        <path d="M18,-18 Q40,-15 50,10" fill="none" stroke="#00d4ff" stroke-width="1.5"/>
+        <!-- Body -->
+        <line x1="-50" y1="10" x2="-45" y2="55" stroke="#00d4ff" stroke-width="1.5"/>
+        <line x1="50" y1="10" x2="45" y2="55" stroke="#00d4ff" stroke-width="1.5"/>
+        <!-- Torso lines -->
+        <path d="M-30,0 L-25,50" fill="none" stroke="#00d4ff" stroke-width="1"/>
+        <path d="M30,0 L25,50" fill="none" stroke="#00d4ff" stroke-width="1"/>
+        <!-- Collar -->
+        <path d="M-15,-15 Q0,-10 15,-15" fill="none" stroke="#00d4ff" stroke-width="1"/>
+      </g>
+    </g>
+    
+    <!-- Depth Map Preview -->
+    <g transform="translate(220, 215)">
+      <text x="0" y="-10" font-family="'SF Mono', 'Fira Code', monospace" font-size="11" fill="#6b7280">Depth Map (Z-buffer)</text>
+      <rect x="0" y="0" width="160" height="120" rx="4" fill="#0d0d15" stroke="#3b3b5c" stroke-width="1"/>
+      
+      <!-- Depth gradient silhouette -->
+      <g transform="translate(80, 60)">
+        <!-- Head - brightest (closest) -->
+        <ellipse cx="0" cy="-40" rx="18" ry="22" fill="#ffffff" opacity="0.9"/>
+        <!-- Shoulders -->
+        <path d="M-18,-18 Q-40,-15 -50,10 L-45,55 L-30,50 L-30,0 Z" fill="#c0c0c0" opacity="0.7"/>
+        <path d="M18,-18 Q40,-15 50,10 L45,55 L30,50 L30,0 Z" fill="#c0c0c0" opacity="0.7"/>
+        <!-- Torso - slightly darker -->
+        <rect x="-30" y="-5" width="60" height="55" rx="5" fill="#a0a0a0" opacity="0.6"/>
+        <!-- Neck -->
+        <rect x="-10" y="-22" width="20" height="20" fill="#d0d0d0" opacity="0.8"/>
+      </g>
+    </g>
+    
+    <text x="30" y="365" font-family="'SF Mono', 'Fira Code', monospace" font-size="10" fill="#6b7280">Edge preserves silhouette contours</text>
+    <text x="30" y="385" font-family="'SF Mono', 'Fira Code', monospace" font-size="10" fill="#6b7280">Depth preserves spatial relationships</text>
+    <text x="30" y="405" font-family="'SF Mono', 'Fira Code', monospace" font-size="10" fill="#10b981">→ Together: fit geometry is preserved</text>
+  </g>
+  
+  <!-- Flow Arrow Left to Center -->
+  <g transform="translate(520, 340)">
+    <path d="M0,0 L100,0" stroke="#10b981" stroke-width="3" fill="none"/>
+    <polygon points="100,-8 120,0 100,8" fill="#10b981"/>
+    <text x="60" y="-15" font-family="'SF Mono', 'Fira Code', monospace" font-size="10" fill="#6b7280" text-anchor="middle">CONDITION</text>
+  </g>
+  
+  <!-- Center: ControlNet Processing -->
+  <g transform="translate(660, 180)">
+    <rect x="0" y="0" width="380" height="320" rx="12" fill="#1a1a2e" stroke="url(#controlnetGrad)" stroke-width="3"/>
+    
+    <!-- Gradient background effect -->
+    <rect x="5" y="5" width="370" height="310" rx="10" fill="url(#controlnetGrad)" opacity="0.1"/>
+    
+    <!-- Header -->
+    <rect x="0" y="0" width="380" height="50" rx="12" fill="url(#controlnetGrad)" opacity="0.25"/>
+    <text x="190" y="33" font-family="'SF Mono', 'Fira Code', monospace" font-size="18" fill="#fff" text-anchor="middle" font-weight="600">ControlNet</text>
+    
+    <!-- Subheader -->
+    <text x="190" y="80" font-family="'SF Mono', 'Fira Code', monospace" font-size="14" fill="#00d4ff" text-anchor="middle">Edge + Depth Conditioning</text>
+    
+    <!-- Architecture diagram -->
+    <g transform="translate(40, 110)">
+      <!-- SDXL Base -->
+      <rect x="0" y="0" width="120" height="60" rx="6" fill="#0d0d15" stroke="#7c3aed" stroke-width="2"/>
+      <text x="60" y="25" font-family="'SF Mono', 'Fira Code', monospace" font-size="11" fill="#7c3aed" text-anchor="middle">SDXL</text>
+      <text x="60" y="45" font-family="'SF Mono', 'Fira Code', monospace" font-size="11" fill="#7c3aed" text-anchor="middle">UNet</text>
+      
+      <!-- Plus sign -->
+      <text x="145" y="35" font-family="'SF Mono', 'Fira Code', monospace" font-size="20" fill="#6b7280">+</text>
+      
+      <!-- ControlNet adapter -->
+      <rect x="180" y="0" width="120" height="60" rx="6" fill="#0d0d15" stroke="#f59e0b" stroke-width="2"/>
+      <text x="240" y="25" font-family="'SF Mono', 'Fira Code', monospace" font-size="11" fill="#f59e0b" text-anchor="middle">ControlNet</text>
+      <text x="240" y="45" font-family="'SF Mono', 'Fira Code', monospace" font-size="11" fill="#f59e0b" text-anchor="middle">Adapter</text>
+    </g>
+    
+    <!-- Key insight -->
+    <rect x="30" y="190" width="320" height="50" rx="6" fill="#0d0d15" stroke="#10b981" stroke-width="1"/>
+    <text x="190" y="215" font-family="'SF Mono', 'Fira Code', monospace" font-size="11" fill="#10b981" text-anchor="middle">Constraints preserve fit geometry</text>
+    <text x="190" y="232" font-family="'SF Mono', 'Fira Code', monospace" font-size="10" fill="#6b7280" text-anchor="middle">while generating photorealistic textures</text>
+    
+    <!-- Process steps -->
+    <text x="30" y="270" font-family="'SF Mono', 'Fira Code', monospace" font-size="10" fill="#9ca3af">1. Encode edge + depth as spatial conditions</text>
+    <text x="30" y="290" font-family="'SF Mono', 'Fira Code', monospace" font-size="10" fill="#9ca3af">2. SDXL generates texture within constraints</text>
+    <text x="30" y="310" font-family="'SF Mono', 'Fira Code', monospace" font-size="10" fill="#9ca3af">3. Output respects original fit boundaries</text>
+  </g>
+  
+  <!-- Flow Arrow Center to Right -->
+  <g transform="translate(1060, 340)">
+    <path d="M0,0 L100,0" stroke="#10b981" stroke-width="3" fill="none"/>
+    <polygon points="100,-8 120,0 100,8" fill="#10b981"/>
+    <text x="60" y="-15" font-family="'SF Mono', 'Fira Code', monospace" font-size="10" fill="#6b7280" text-anchor="middle">GENERATE</text>
+  </g>
+  
+  <!-- Right Panel: Output -->
+  <g transform="translate(1200, 130)">
+    <rect x="0" y="0" width="420" height="420" rx="8" fill="#1a1a2e" stroke="#10b981" stroke-width="2"/>
+    <rect x="0" y="0" width="420" height="45" rx="8" fill="#10b981" opacity="0.15"/>
+    <text x="20" y="30" font-family="'SF Mono', 'Fira Code', monospace" font-size="16" fill="#10b981" font-weight="600">OUTPUT</text>
+    
+    <!-- Photorealistic result preview -->
+    <g transform="translate(60, 70)">
+      <text x="150" y="-10" font-family="'SF Mono', 'Fira Code', monospace" font-size="12" fill="#6b7280" text-anchor="middle">Photoreal Image Preview</text>
+      
+      <!-- Frame with glow -->
+      <rect x="0" y="0" width="300" height="220" rx="8" fill="#0d0d15" stroke="#10b981" stroke-width="2" filter="url(#photoGlow)"/>
+      
+      <!-- Stylized photorealistic figure representation -->
+      <g transform="translate(150, 110)">
+        <!-- Background gradient -->
+        <rect x="-140" y="-100" width="280" height="200" rx="4" fill="#1a1a2e"/>
+        
+        <!-- Studio lighting effect -->
+        <ellipse cx="0" cy="-60" rx="100" ry="50" fill="#2a2a3e" opacity="0.5"/>
+        
+        <!-- Figure silhouette with realistic coloring -->
+        <!-- Head with skin tone -->
+        <ellipse cx="0" cy="-55" rx="25" ry="30" fill="#d4a574"/>
+        <!-- Hair -->
+        <ellipse cx="0" cy="-75" rx="28" ry="20" fill="#2d2d2d"/>
+        
+        <!-- Neck -->
+        <rect x="-12" y="-30" width="24" height="20" fill="#d4a574"/>
+        
+        <!-- Hoodie body with realistic fabric -->
+        <path d="M-60,-10 Q-70,-10 -75,20 L-80,85 Q-80,95 -60,95 L60,95 Q80,95 80,85 L75,20 Q70,-10 60,-10 L35,-10 Q20,-15 0,-20 Q-20,-15 -35,-10 Z" 
+              fill="#4a6fa5"/>
+        
+        <!-- Hood -->
+        <path d="M-35,-10 Q-40,-25 -30,-35 Q0,-50 30,-35 Q40,-25 35,-10 Q20,-15 0,-20 Q-20,-15 -35,-10 Z"
+              fill="#3d5a80"/>
+        
+        <!-- Fabric folds/wrinkles -->
+        <path d="M-50,20 Q-30,25 -40,60" stroke="#3d5a80" stroke-width="2" fill="none"/>
+        <path d="M50,20 Q30,25 40,60" stroke="#3d5a80" stroke-width="2" fill="none"/>
+        <path d="M-20,30 L-15,80" stroke="#3d5a80" stroke-width="1.5" fill="none"/>
+        <path d="M20,30 L15,80" stroke="#3d5a80" stroke-width="1.5" fill="none"/>
+        
+        <!-- Pocket detail -->
+        <rect x="-25" y="40" width="50" height="35" rx="3" fill="none" stroke="#3d5a80" stroke-width="1.5"/>
+        
+        <!-- Drawstrings -->
+        <line x1="-10" y1="-5" x2="-15" y2="30" stroke="#c0c0c0" stroke-width="1.5"/>
+        <line x1="10" y1="-5" x2="15" y2="30" stroke="#c0c0c0" stroke-width="1.5"/>
+        
+        <!-- Light reflection -->
+        <ellipse cx="-30" cy="10" rx="15" ry="25" fill="#5d8bc7" opacity="0.3"/>
+      </g>
+      
+      <!-- Quality indicator -->
+      <rect x="10" y="190" width="80" height="20" rx="3" fill="#10b981" opacity="0.2"/>
+      <text x="50" y="205" font-family="'SF Mono', 'Fira Code', monospace" font-size="9" fill="#10b981" text-anchor="middle">PHOTOREAL</text>
+    </g>
+    
+    <!-- Output specs -->
+    <text x="20" y="320" font-family="'SF Mono', 'Fira Code', monospace" font-size="12" fill="#7c3aed">Output:</text>
+    <text x="90" y="320" font-family="'SF Mono', 'Fira Code', monospace" font-size="12" fill="#fff">final_render.png</text>
+    
+    <text x="20" y="345" font-family="'SF Mono', 'Fira Code', monospace" font-size="12" fill="#7c3aed">Resolution:</text>
+    <text x="115" y="345" font-family="'SF Mono', 'Fira Code', monospace" font-size="12" fill="#9ca3af">1024×1024 (native SDXL)</text>
+    
+    <text x="20" y="370" font-family="'SF Mono', 'Fira Code', monospace" font-size="12" fill="#7c3aed">Quality:</text>
+    <text x="90" y="370" font-family="'SF Mono', 'Fira Code', monospace" font-size="12" fill="#f59e0b">(measured in PoC)</text>
+    
+    <line x1="20" y1="385" x2="400" y2="385" stroke="#2a2a3e" stroke-width="1"/>
+    
+    <text x="20" y="405" font-family="'SF Mono', 'Fira Code', monospace" font-size="10" fill="#6b7280">Preserves fit accuracy from 3D simulation</text>
+  </g>
+  
+  <!-- Bottom: Technical Details -->
+  <g transform="translate(80, 590)">
+    <rect x="0" y="0" width="500" height="170" rx="8" fill="#1a1a2e" stroke="#00d4ff" stroke-width="2"/>
+    <rect x="0" y="0" width="500" height="40" rx="8" fill="#00d4ff" opacity="0.1"/>
+    <text x="20" y="27" font-family="'SF Mono', 'Fira Code', monospace" font-size="15" fill="#00d4ff" font-weight="600">CONTROLNET MODELS</text>
+    
+    <text x="20" y="70" font-family="'SF Mono', 'Fira Code', monospace" font-size="12" fill="#7c3aed">canny</text>
+    <text x="90" y="70" font-family="'SF Mono', 'Fira Code', monospace" font-size="11" fill="#9ca3af">: Edge detection conditioning</text>
+    
+    <text x="20" y="95" font-family="'SF Mono', 'Fira Code', monospace" font-size="12" fill="#7c3aed">depth</text>
+    <text x="90" y="95" font-family="'SF Mono', 'Fira Code', monospace" font-size="11" fill="#9ca3af">: Z-buffer spatial conditioning</text>
+    
+    <text x="20" y="120" font-family="'SF Mono', 'Fira Code', monospace" font-size="12" fill="#7c3aed">normal</text>
+    <text x="90" y="120" font-family="'SF Mono', 'Fira Code', monospace" font-size="11" fill="#9ca3af">: Surface normal map (optional)</text>
+    
+    <line x1="20" y1="135" x2="480" y2="135" stroke="#2a2a3e" stroke-width="1"/>
+    
+    <text x="20" y="158" font-family="'SF Mono', 'Fira Code', monospace" font-size="10" fill="#6b7280">Multi-ControlNet: Edge + Depth combined for best results</text>
+  </g>
+  
+  <!-- Bottom Center: Generation Pipeline -->
+  <g transform="translate(620, 590)">
+    <rect x="0" y="0" width="400" height="170" rx="8" fill="#1a1a2e" stroke="#f59e0b" stroke-width="2"/>
+    <rect x="0" y="0" width="400" height="40" rx="8" fill="#f59e0b" opacity="0.15"/>
+    <text x="20" y="27" font-family="'SF Mono', 'Fira Code', monospace" font-size="15" fill="#f59e0b" font-weight="600">GENERATION PIPELINE</text>
+    
+    <!-- Pipeline steps -->
+    <g transform="translate(25, 60)">
+      <rect x="0" y="0" width="70" height="35" rx="4" fill="#2a2a3e" stroke="#7c3aed" stroke-width="1"/>
+      <text x="35" y="22" font-family="'SF Mono', 'Fira Code', monospace" font-size="9" fill="#7c3aed" text-anchor="middle">Render</text>
+    </g>
+    
+    <text x="105" y="82" font-family="'SF Mono', 'Fira Code', monospace" font-size="12" fill="#6b7280">→</text>
+    
+    <g transform="translate(120, 60)">
+      <rect x="0" y="0" width="70" height="35" rx="4" fill="#2a2a3e" stroke="#00d4ff" stroke-width="1"/>
+      <text x="35" y="22" font-family="'SF Mono', 'Fira Code', monospace" font-size="9" fill="#00d4ff" text-anchor="middle">Extract</text>
+    </g>
+    
+    <text x="200" y="82" font-family="'SF Mono', 'Fira Code', monospace" font-size="12" fill="#6b7280">→</text>
+    
+    <g transform="translate(215, 60)">
+      <rect x="0" y="0" width="70" height="35" rx="4" fill="#2a2a3e" stroke="#f59e0b" stroke-width="1"/>
+      <text x="35" y="22" font-family="'SF Mono', 'Fira Code', monospace" font-size="9" fill="#f59e0b" text-anchor="middle">Condition</text>
+    </g>
+    
+    <text x="295" y="82" font-family="'SF Mono', 'Fira Code', monospace" font-size="12" fill="#6b7280">→</text>
+    
+    <g transform="translate(310, 60)">
+      <rect x="0" y="0" width="70" height="35" rx="4" fill="#2a2a3e" stroke="#10b981" stroke-width="1"/>
+      <text x="35" y="22" font-family="'SF Mono', 'Fira Code', monospace" font-size="9" fill="#10b981" text-anchor="middle">Generate</text>
+    </g>
+    
+    <text x="25" y="125" font-family="'SF Mono', 'Fira Code', monospace" font-size="10" fill="#6b7280">Inference: ~8-15 seconds per image (A100)</text>
+    <text x="25" y="145" font-family="'SF Mono', 'Fira Code', monospace" font-size="10" fill="#6b7280">Batch processing supported for efficiency</text>
+  </g>
+  
+  <!-- Bottom Right: Quality Metrics -->
+  <g transform="translate(1060, 590)">
+    <rect x="0" y="0" width="300" height="170" rx="8" fill="#1a1a2e" stroke="#10b981" stroke-width="2"/>
+    <rect x="0" y="0" width="300" height="40" rx="8" fill="#10b981" opacity="0.15"/>
+    <text x="20" y="27" font-family="'SF Mono', 'Fira Code', monospace" font-size="15" fill="#10b981" font-weight="600">QUALITY TARGETS</text>
+    
+    <text x="20" y="70" font-family="'SF Mono', 'Fira Code', monospace" font-size="12" fill="#00d4ff">FID Score</text>
+    <text x="130" y="70" font-family="'SF Mono', 'Fira Code', monospace" font-size="12" fill="#fff">: TBD (PoC)</text>
+    
+    <text x="20" y="95" font-family="'SF Mono', 'Fira Code', monospace" font-size="12" fill="#00d4ff">Edge Accuracy</text>
+    <text x="145" y="95" font-family="'SF Mono', 'Fira Code', monospace" font-size="12" fill="#fff">: >95%</text>
+    
+    <text x="20" y="120" font-family="'SF Mono', 'Fira Code', monospace" font-size="12" fill="#00d4ff">User Preference</text>
+    <text x="155" y="120" font-family="'SF Mono', 'Fira Code', monospace" font-size="12" fill="#fff">: TBD</text>
+    
+    <line x1="20" y1="135" x2="280" y2="135" stroke="#2a2a3e" stroke-width="1"/>
+    
+    <text x="20" y="158" font-family="'SF Mono', 'Fira Code', monospace" font-size="10" fill="#6b7280">A/B testing vs 3D render planned</text>
+  </g>
+</svg>
