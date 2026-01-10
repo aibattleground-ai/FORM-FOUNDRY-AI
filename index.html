@@ -1,4 +1,5 @@
 
+
 <!DOCTYPE html>
 <html lang="ko" class="scroll-smooth">
 <head>
@@ -52,24 +53,110 @@
     /* 스크롤바 숨기기 (깔끔한 UI 위해) */
     .no-scrollbar::-webkit-scrollbar { display: none; }
     .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+    /* Navigation styles */
+.nav-link {
+  position: relative;
+  transition: color 0.3s ease;
+}
+
+.nav-link::after {
+  content: '';
+  position: absolute;
+  bottom: -4px;
+  left: 0;
+  width: 0;
+  height: 2px;
+  background: linear-gradient(90deg, #4F9DFF, #9B6FFF);
+  transition: width 0.3s ease;
+}
+
+.nav-link:hover::after,
+.nav-link.active::after {
+  width: 100%;
+}
+
+.nav-link:hover {
+  color: #4F9DFF;
+}
+
+/* Mobile menu */
+.mobile-menu {
+  transform: translateX(100%);
+  transition: transform 0.3s ease;
+}
+
+.mobile-menu.open {
+  transform: translateX(0);
+}
+
+/* Header backdrop blur on scroll */
+header.scrolled {
+  background: rgba(11, 15, 26, 0.85);
+  backdrop-filter: blur(20px);
+}
   </style>
 </head>
 <body class="antialiased">
 
-<header class="fixed top-0 left-0 right-0 z-50 border-b border-border bg-deep/80 backdrop-blur-xl">
-  <div class="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
-    <div class="flex items-center gap-3">
-      <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-accent to-accent-2 flex items-center justify-center font-bold text-deep">FFAI</div>
-      <div>
-        <div class="font-display font-bold text-lg">FORM FOUNDRY AI</div>
-        <div class="font-mono text-xs text-gray-500">Technical Architecture v1.0</div>
+<!-- Navigation -->
+<header class="fixed top-0 left-0 right-0 z-50 border-b border-border transition-all duration-300">
+  <div class="max-w-7xl mx-auto px-6 py-4">
+    <div class="flex items-center justify-between">
+      <!-- Logo -->
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-accent to-accent-2 flex items-center justify-center font-bold text-deep">FFAI</div>
+        <div>
+          <div class="font-display font-bold text-lg text-white">FORM FOUNDRY AI</div>
+          <div class="font-mono text-xs text-gray-500">Technical Architecture v1.0</div>
+        </div>
       </div>
-    </div>
-    <div class="flex items-center gap-4">
-      <span class="font-mono text-xs text-gray-500">NEXUSSPHERE</span>
-      <span class="font-mono text-xs text-accent">2026</span>
+      
+      <!-- Desktop Navigation -->
+      <nav class="hidden lg:flex items-center gap-6">
+        <a href="#hero" class="nav-link text-sm font-medium text-gray-400">Home</a>
+        <a href="#architecture" class="nav-link text-sm font-medium text-gray-400">Architecture</a>
+        <a href="#modules" class="nav-link text-sm font-medium text-gray-400">Modules</a>
+        <a href="#story" class="nav-link text-sm font-medium text-gray-400">Pipeline</a>
+        <a href="#flywheel" class="nav-link text-sm font-medium text-gray-400">Data Flywheel</a>
+        <a href="#validation" class="nav-link text-sm font-medium text-gray-400">Validation</a>
+        <a href="#roadmap" class="nav-link text-sm font-medium text-gray-400">Roadmap</a>
+        <a href="#faq" class="nav-link text-sm font-medium text-gray-400">FAQ</a>
+      </nav>
+      
+      <!-- Mobile Menu Button -->
+      <button id="mobileMenuBtn" class="lg:hidden w-10 h-10 flex items-center justify-center text-gray-400 hover:text-accent transition-colors">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/>
+        </svg>
+      </button>
     </div>
   </div>
+</header>
+
+<!-- Mobile Menu -->
+<div id="mobileMenu" class="mobile-menu fixed top-0 right-0 bottom-0 w-full max-w-sm bg-surface border-l border-border z-50 lg:hidden">
+  <div class="p-6">
+    <div class="flex items-center justify-between mb-8">
+      <span class="font-display font-bold text-lg">Menu</span>
+      <button id="closeMobileMenu" class="w-10 h-10 flex items-center justify-center text-gray-400 hover:text-accent transition-colors">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+        </svg>
+      </button>
+    </div>
+    
+    <nav class="space-y-2">
+      <a href="#hero" class="mobile-nav-link block py-3 px-4 rounded-lg text-gray-400 hover:text-accent hover:bg-surface-2 transition-all">Home</a>
+      <a href="#architecture" class="mobile-nav-link block py-3 px-4 rounded-lg text-gray-400 hover:text-accent hover:bg-surface-2 transition-all">Architecture</a>
+      <a href="#modules" class="mobile-nav-link block py-3 px-4 rounded-lg text-gray-400 hover:text-accent hover:bg-surface-2 transition-all">Modules</a>
+      <a href="#story" class="mobile-nav-link block py-3 px-4 rounded-lg text-gray-400 hover:text-accent hover:bg-surface-2 transition-all">Pipeline</a>
+      <a href="#flywheel" class="mobile-nav-link block py-3 px-4 rounded-lg text-gray-400 hover:text-accent hover:bg-surface-2 transition-all">Data Flywheel</a>
+      <a href="#validation" class="mobile-nav-link block py-3 px-4 rounded-lg text-gray-400 hover:text-accent hover:bg-surface-2 transition-all">Validation</a>
+      <a href="#roadmap" class="mobile-nav-link block py-3 px-4 rounded-lg text-gray-400 hover:text-accent hover:bg-surface-2 transition-all">Roadmap</a>
+      <a href="#faq" class="mobile-nav-link block py-3 px-4 rounded-lg text-gray-400 hover:text-accent hover:bg-surface-2 transition-all">FAQ</a>
+    </nav>
+  </div>
+</div>
 </header>
 
 <section id="hero" class="relative min-h-screen flex items-center justify-center overflow-hidden pt-20">
@@ -2075,6 +2162,64 @@ document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
   mount('svgGen', svg.gen);
 
 })();
+// Mobile Menu Toggle
+const mobileMenuBtn = document.getElementById('mobileMenuBtn');
+const closeMobileMenu = document.getElementById('closeMobileMenu');
+const mobileMenu = document.getElementById('mobileMenu');
+const mobileNavLinks = document.querySelectorAll('.mobile-nav-link');
+
+if (mobileMenuBtn) {
+  mobileMenuBtn.addEventListener('click', () => {
+    mobileMenu.classList.add('open');
+  });
+}
+
+if (closeMobileMenu) {
+  closeMobileMenu.addEventListener('click', () => {
+    mobileMenu.classList.remove('open');
+  });
+}
+
+mobileNavLinks.forEach(link => {
+  link.addEventListener('click', () => {
+    mobileMenu.classList.remove('open');
+  });
+});
+
+// Header scroll effect
+const header = document.querySelector('header');
+if (header) {
+  window.addEventListener('scroll', () => {
+    if (window.scrollY > 100) {
+      header.classList.add('scrolled');
+    } else {
+      header.classList.remove('scrolled');
+    }
+  });
+}
+
+// Active nav link on scroll
+const sections = document.querySelectorAll('section[id]');
+const navLinks = document.querySelectorAll('.nav-link');
+
+window.addEventListener('scroll', () => {
+  let current = '';
+  
+  sections.forEach(section => {
+    const sectionTop = section.offsetTop;
+    const sectionHeight = section.clientHeight;
+    if (pageYOffset >= (sectionTop - 200)) {
+      current = section.getAttribute('id');
+    }
+  });
+
+  navLinks.forEach(link => {
+    link.classList.remove('active');
+    if (link.getAttribute('href') === `#${current}`) {
+      link.classList.add('active');
+    }
+  });
+});
 </script>
 </body>
 </html>
