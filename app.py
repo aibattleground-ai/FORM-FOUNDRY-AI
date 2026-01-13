@@ -1,952 +1,2225 @@
-import math
-import time
-import urllib.request
-from dataclasses import dataclass
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
-
-import cv2
-import numpy as np
-import streamlit as st
-import torch
-from PIL import Image, ImageOps
-from ultralytics import YOLO
-import mediapipe as mp
-
-import timm
-from torchvision import transforms
-
-# MediaPipe Tasks
-from mediapipe.tasks import python as mp_tasks
-from mediapipe.tasks.python import vision
 
 
-# =========================================================
-# Config
-# =========================================================
-CIRC_RATIO_CHEST = 2.25   # 2.35 -> 과대/과소 흔들림 커서 완화
-CIRC_RATIO_WAIST = 2.15
-CIRC_RATIO_HIP = 2.20
-
-# "공제(deduction)"는 body_mask를 안쪽으로 복원할 때 쓰는 값(전체 너비 기준)
-GARMENT_DB = {
-    "Short Sleeve": {"base_width_deduct_cm": 0.6, "desc": "Light / Thin Top"},
-    "Long Sleeve":  {"base_width_deduct_cm": 1.0, "desc": "Standard Long Sleeve"},
-    "Hoodie/Sweat": {"base_width_deduct_cm": 2.2, "desc": "Heavy Knit / Fleece"},
-    "Outer/Jacket": {"base_width_deduct_cm": 2.8, "desc": "Outerwear / Thick"},
+<!DOCTYPE html>
+<html lang="ko" class="scroll-smooth">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FormFoundry AI — Technical Architecture Documentation</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script>
+tailwind.config = {
+theme: {
+extend: {
+colors: {
+deep: '#0a0a0f',
+surface: '#12121a',
+'surface-2': '#1a1a24',
+border: '#2a2a38',
+accent: '#00d4ff',
+'accent-2': '#7c3aed',
+success: '#10b981',
+warning: '#f59e0b',
+},
+fontFamily: {
+display: ['Outfit', 'sans-serif'],
+mono: ['JetBrains Mono', 'monospace'],
+},
 }
-
-# Fit의 air-gap 공제를 MVP 수준으로 낮춤(기존 1.5~4.0은 반팔에서 과도)
-FIT_DB = {
-    "Tight":   {"ease_width_deduct_cm": 0.2, "msg": "Skin Fit (Low air-gap)"},
-    "Regular": {"ease_width_deduct_cm": 0.7, "msg": "Standard Drape"},
-    "Loose":   {"ease_width_deduct_cm": 1.6, "msg": "Air-gap / Gravity Drape"},
 }
-
-POSE_EDGES = [
-    (0, 1), (1, 2), (2, 3), (0, 4), (4, 5), (5, 6),
-    (3, 7), (6, 8), (9, 10),
-    (11, 12), (11, 23), (12, 24), (23, 24),
-    (11, 13), (13, 15), (15, 17), (15, 19), (15, 21),
-    (12, 14), (14, 16), (16, 18), (16, 20), (16, 22),
-    (23, 25), (25, 27), (27, 29), (29, 31),
-    (24, 26), (26, 28), (28, 30), (30, 32),
-]
-
-MODELS_DIR = Path(__file__).parent / "models"
-POSE_TASK_PATH = MODELS_DIR / "pose_landmarker_heavy.task"
-POSE_TASK_URL = (
-    "https://storage.googleapis.com/mediapipe-models/pose_landmarker/"
-    "pose_landmarker_heavy/float16/latest/pose_landmarker_heavy.task"
-)
-
-
-# =========================================================
-# Data container
-# =========================================================
-@dataclass
-class Lm:
-    x: float
-    y: float
-    z: float = 0.0
-    visibility: float = 1.0
-
-
-# =========================================================
-# Cached loaders
-# =========================================================
-def _ensure_pose_task() -> None:
-    MODELS_DIR.mkdir(parents=True, exist_ok=True)
-    if POSE_TASK_PATH.exists():
-        return
-    # 다운로드(웹 배포/Streamlit Cloud에서도 동작)
-    urllib.request.urlretrieve(POSE_TASK_URL, str(POSE_TASK_PATH))
-
-
-@st.cache_resource(show_spinner=False)
-def load_pose_landmarker() -> vision.PoseLandmarker:
-    _ensure_pose_task()
-    base = mp_tasks.BaseOptions(model_asset_path=str(POSE_TASK_PATH))
-    opts = vision.PoseLandmarkerOptions(
-        base_options=base,
-        running_mode=vision.RunningMode.IMAGE,
-        num_poses=1,
-        output_segmentation_masks=False,
-    )
-    return vision.PoseLandmarker.create_from_options(opts)
-
-
-@st.cache_resource(show_spinner=False)
-def load_yolo() -> YOLO:
-    return YOLO("yolov8n-seg.pt")
-
-
-@st.cache_resource(show_spinner=False)
-def load_material_backbone(name: str = "swin_tiny_patch4_window7_224") -> torch.nn.Module:
-    # MVP 데모: "실행"이 핵심이므로 pretrained=True 유지
-    model = timm.create_model(name, pretrained=True, num_classes=0)
-    model.eval()
-    return model
-
-
-# =========================================================
-# Utils
-# =========================================================
-def pil_to_rgb(pil_img: Image.Image) -> np.ndarray:
-    pil_img = ImageOps.exif_transpose(pil_img)
-    return np.array(pil_img.convert("RGB"))
-
-
-def safe_int(v: float, lo: int, hi: int) -> int:
-    return max(lo, min(int(v), hi))
-
-
-def lm_xy(lm: List[Lm], idx: int, w: int, h: int) -> Tuple[int, int]:
-    return safe_int(lm[idx].x * w, 0, w - 1), safe_int(lm[idx].y * h, 0, h - 1)
-
-
-def draw_skeleton(img_bgr: np.ndarray, lm: List[Lm]) -> None:
-    h, w = img_bgr.shape[:2]
-    for a, b in POSE_EDGES:
-        ax, ay = lm_xy(lm, a, w, h)
-        bx, by = lm_xy(lm, b, w, h)
-        cv2.line(img_bgr, (ax, ay), (bx, by), (255, 255, 255), 2, cv2.LINE_AA)
-    for i in range(len(lm)):
-        x, y = lm_xy(lm, i, w, h)
-        cv2.circle(img_bgr, (x, y), 3, (0, 255, 255), -1, cv2.LINE_AA)
-
-
-def rotation_compensation(lm: List[Lm]) -> Tuple[float, float]:
-    lz, rz = lm[11].z, lm[12].z
-    z_diff = abs(lz - rz)
-    theta = min(z_diff * 2.0, 1.0)
-    deg = math.degrees(theta)
-    factor = 1.0 / max(math.cos(theta), 0.55)
-    return factor, deg
-
-
-def geodesic_height_px(lm: List[Lm], w: int, h: int) -> float:
-    def dist(i1: int, i2: int) -> float:
-        x1, y1 = lm[i1].x * w, lm[i1].y * h
-        x2, y2 = lm[i2].x * w, lm[i2].y * h
-        return math.hypot(x2 - x1, y2 - y1)
-
-    # head: nose->mid-shoulder (보정은 낮춤: 1.6 -> 1.25)
-    mid_sh_x = (lm[11].x + lm[12].x) / 2
-    mid_sh_y = (lm[11].y + lm[12].y) / 2
-    nose_x, nose_y = lm[0].x * w, lm[0].y * h
-    head = math.hypot(mid_sh_x * w - nose_x, mid_sh_y * h - nose_y) * 1.25
-
-    torso = (dist(11, 23) + dist(12, 24)) / 2
-    left_leg = dist(23, 25) + dist(25, 27)
-    right_leg = dist(24, 26) + dist(26, 28)
-    leg = (left_leg + right_leg) / 2
-    return head + torso + leg
-
-
-def vertical_span_height_px(lm: List[Lm], h: int) -> float:
-    # 상단: nose/eyes/ears 중 가장 위
-    top = min(lm[i].y for i in [0, 1, 2, 3, 4, 5, 6, 7, 8])
-    # 하단: heels/foot-index 중 가장 아래
-    bottom = max(lm[i].y for i in [29, 30, 31, 32, 27, 28])
-    span = max(0.0, (bottom - top) * h)
-    return span
-
-
-def estimate_px_per_cm(lm: List[Lm], w: int, h: int, height_cm: float) -> Tuple[float, Dict[str, float]]:
-    """
-    1) geodesic + vertical span을 섞어서 스케일 안정화
-    2) 어깨/키 비율 sanity calibration(약하게)로 과소/과대 스케일을 완화
-    """
-    px_geo = geodesic_height_px(lm, w, h)
-    px_span = vertical_span_height_px(lm, h)
-
-    # 둘 중 하나가 실패하면 다른 쪽 사용
-    px_h = 0.55 * px_span + 0.45 * px_geo if (px_span > 10 and px_geo > 10) else max(px_span, px_geo)
-    px_per_cm = px_h / max(height_cm, 1e-6)
-
-    # shoulder sanity (약한 보정)
-    sh_px = math.hypot((lm[11].x - lm[12].x) * w, (lm[11].y - lm[12].y) * h)
-    shoulder_cm_raw = sh_px / max(px_per_cm, 1e-6)
-    ratio = shoulder_cm_raw / max(height_cm, 1e-6)
-
-    # 남성 기준 대략 0.215~0.285 범위에 약하게 맞춤(데모용)
-    target_min = 0.215
-    target_max = 0.285
-    adj = 1.0
-    if ratio < target_min:
-        adj = ratio / target_min  # <1 => px_per_cm 줄여서(cm 증가)
-        px_per_cm *= max(adj, 0.82)  # 과보정 방지
-    elif ratio > target_max:
-        adj = ratio / target_max  # >1 => px_per_cm 늘려서(cm 감소)
-        px_per_cm *= min(adj, 1.18)
-
-    dbg = {
-        "px_geo": float(px_geo),
-        "px_span": float(px_span),
-        "px_h_used": float(px_h),
-        "px_per_cm": float(px_per_cm),
-        "shoulder_cm_raw": float(shoulder_cm_raw),
-        "shoulder_height_ratio": float(ratio),
-        "shoulder_sanity_adj": float(adj),
-    }
-    return float(px_per_cm), dbg
-
-
-def yolo_person_mask(rgb: np.ndarray, yolo: YOLO) -> Tuple[np.ndarray, float]:
-    h, w = rgb.shape[:2]
-    conf = 0.0
-    mask_bin = np.zeros((h, w), dtype=np.uint8)
-
-    res = yolo(rgb, verbose=False, classes=[0], conf=0.25)
-    if not res or res[0] is None:
-        return mask_bin, conf
-    r0 = res[0]
-    if r0.masks is None or r0.boxes is None or len(r0.boxes) == 0:
-        return mask_bin, conf
-
-    c = r0.boxes.conf.detach().cpu()
-    best = int(torch.argmax(c).item())
-    conf = float(c[best].item())
-
-    m = r0.masks.data[best].detach().cpu().numpy()
-    if m.ndim == 2:
-        m = cv2.resize(m, (w, h))
-        mask_bin = (m > 0.5).astype(np.uint8)
-        k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
-        mask_bin = cv2.morphologyEx(mask_bin, cv2.MORPH_CLOSE, k, iterations=2)
-    return mask_bin, conf
-
-
-def build_adaptive_skin_mask(rgb: np.ndarray, person_mask: np.ndarray, lm: List[Lm]) -> Tuple[np.ndarray, Dict[str, float]]:
-    h, w = rgb.shape[:2]
-    ycrcb = cv2.cvtColor(rgb, cv2.COLOR_RGB2YCrCb)
-
-    face_idx = [0, 1, 2, 3, 4, 5, 6, 9, 10]
-    samples = []
-    for idx in face_idx:
-        x, y = lm_xy(lm, idx, w, h)
-        x1, x2 = max(0, x - 6), min(w, x + 6)
-        y1, y2 = max(0, y - 6), min(h, y + 6)
-        patch = ycrcb[y1:y2, x1:x2, :]
-        if patch.size > 0:
-            samples.append(patch.reshape(-1, 3))
-
-    if len(samples) == 0:
-        lower = np.array([0, 135, 85], dtype=np.uint8)
-        upper = np.array([255, 180, 135], dtype=np.uint8)
-    else:
-        s = np.vstack(samples)
-        mean = s.mean(axis=0)
-        std = s.std(axis=0) + 1e-6
-
-        y_lo = max(25, int(mean[0] - 2.5 * std[0]))
-        y_hi = min(255, int(mean[0] + 2.5 * std[0]))
-        cr_lo = max(120, int(mean[1] - 2.8 * std[1]))
-        cr_hi = min(205, int(mean[1] + 2.8 * std[1]))
-        cb_lo = max(70, int(mean[2] - 2.8 * std[2]))
-        cb_hi = min(170, int(mean[2] + 2.8 * std[2]))
-
-        lower = np.array([y_lo, cr_lo, cb_lo], dtype=np.uint8)
-        upper = np.array([y_hi, cr_hi, cb_hi], dtype=np.uint8)
-
-    skin = cv2.inRange(ycrcb, lower, upper)
-    skin = (skin > 0).astype(np.uint8)
-    skin = cv2.bitwise_and(skin, skin, mask=person_mask)
-
-    k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
-    skin = cv2.morphologyEx(skin, cv2.MORPH_OPEN, k, iterations=1)
-    skin = cv2.morphologyEx(skin, cv2.MORPH_CLOSE, k, iterations=2)
-
-    stats = {
-        "lower_Y": float(lower[0]), "lower_Cr": float(lower[1]), "lower_Cb": float(lower[2]),
-        "upper_Y": float(upper[0]), "upper_Cr": float(upper[1]), "upper_Cb": float(upper[2]),
-    }
-    return skin, stats
-
-
-def arm_skin_exposure(skin_mask: np.ndarray, lm: List[Lm], w: int, h: int) -> float:
-    def segment_box(i1: int, i2: int, pad: int = 12) -> Tuple[int, int, int, int]:
-        x1, y1 = lm_xy(lm, i1, w, h)
-        x2, y2 = lm_xy(lm, i2, w, h)
-        xa, xb = sorted([x1, x2])
-        ya, yb = sorted([y1, y2])
-        xa = max(0, xa - pad); xb = min(w - 1, xb + pad)
-        ya = max(0, ya - pad); yb = min(h - 1, yb + pad)
-        return xa, ya, xb, yb
-
-    rois = [segment_box(11, 13), segment_box(13, 15), segment_box(12, 14), segment_box(14, 16)]
-    skin_pixels = 0
-    total_pixels = 0
-    for xa, ya, xb, yb in rois:
-        roi = skin_mask[ya:yb, xa:xb]
-        if roi.size == 0:
-            continue
-        skin_pixels += int(roi.sum())
-        total_pixels += int(roi.size)
-    return float(skin_pixels / max(total_pixels, 1))
-
-
-def hood_score(garment_mask: np.ndarray, skin_mask: np.ndarray, lm: List[Lm], w: int, h: int) -> float:
-    _, sh_y = lm_xy(lm, 11, w, h)
-    _, nose_y = lm_xy(lm, 0, w, h)
-    top = max(0, nose_y - int(0.15 * h))
-    bottom = min(h - 1, sh_y + int(0.05 * h))
-
-    left_ear_x, _ = lm_xy(lm, 7, w, h)
-    right_ear_x, _ = lm_xy(lm, 8, w, h)
-    xa = max(0, min(left_ear_x, right_ear_x) - int(0.20 * w))
-    xb = min(w - 1, max(left_ear_x, right_ear_x) + int(0.20 * w))
-
-    gm = garment_mask[top:bottom, xa:xb]
-    sm = skin_mask[top:bottom, xa:xb]
-    if gm.size == 0:
-        return 0.0
-
-    garment_ratio = gm.sum() / gm.size
-    skin_ratio = sm.sum() / max(sm.size, 1)
-    return float(np.clip((garment_ratio * 1.4) - (skin_ratio * 0.6), 0.0, 1.0))
-
-
-def sobel_wrinkle_ratios(gray: np.ndarray) -> Tuple[float, float]:
-    gx = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=5)
-    gy = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=5)
-    mx = float(np.sum(np.abs(gx)))
-    my = float(np.sum(np.abs(gy)))
-    total = mx + my + 1e-6
-    return mx / total, my / total
-
-
-def fft_highfreq_ratio(gray: np.ndarray) -> float:
-    gray = gray.astype(np.float32)
-    gray = cv2.GaussianBlur(gray, (3, 3), 0)
-
-    f = np.fft.fft2(gray)
-    fshift = np.fft.fftshift(f)
-    mag = np.abs(fshift) + 1e-6
-
-    h, w = gray.shape
-    cy, cx = h // 2, w // 2
-    yy, xx = np.ogrid[:h, :w]
-    r = np.sqrt((yy - cy) ** 2 + (xx - cx) ** 2)
-    r_norm = r / (max(h, w) / 2 + 1e-6)
-
-    hf = mag[r_norm > 0.55].sum()
-    total = mag.sum()
-    return float(hf / max(total, 1e-6))
-
-
-def backbone_signature(rgb_roi: np.ndarray, model: torch.nn.Module, device: str = "cpu") -> Dict[str, float]:
-    tfm = transforms.Compose([
-        transforms.ToPILImage(),
-        transforms.Resize((224, 224)),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=(0.485, 0.456, 0.406),
-                             std=(0.229, 0.224, 0.225)),
-    ])
-    x = tfm(rgb_roi).unsqueeze(0).to(device)
-    with torch.no_grad():
-        out = model(x)
-        if isinstance(out, (list, tuple)):
-            out = out[0]
-        if out.ndim == 4:
-            feat_std = float(out.std().item())
-            feat_norm = float(out.flatten().norm().item())
-        else:
-            feat_std = float(out.std().item())
-            feat_norm = float(out.norm().item())
-    return {"bb_feat_std": feat_std, "bb_feat_norm": feat_norm}
-
-
-def largest_contour(mask: np.ndarray) -> Optional[np.ndarray]:
-    cnts, _ = cv2.findContours(mask.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    if not cnts:
-        return None
-    return sorted(cnts, key=cv2.contourArea, reverse=True)[0]
-
-
-def width_run_at_y(mask: np.ndarray, y: int, center_x: int) -> Tuple[int, int, int]:
-    h, w = mask.shape[:2]
-    y = max(0, min(y, h - 1))
-    row = mask[y, :]
-    if row.sum() == 0:
-        return 0, 0, 0
-    idx = np.where(row > 0)[0]
-    if len(idx) == 0:
-        return 0, 0, 0
-
-    runs = []
-    start = idx[0]
-    prev = idx[0]
-    for v in idx[1:]:
-        if v == prev + 1:
-            prev = v
-        else:
-            runs.append((start, prev))
-            start = v
-            prev = v
-    runs.append((start, prev))
-
-    best = None
-    best_dist = 1e9
-    for a, b in runs:
-        if a <= center_x <= b:
-            best = (a, b)
-            break
-        dist = min(abs(center_x - a), abs(center_x - b))
-        if dist < best_dist:
-            best_dist = dist
-            best = (a, b)
-    if best is None:
-        return 0, 0, 0
-    a, b = best
-    return (b - a), a, b
-
-
-# =========================================================
-# Engine
-# =========================================================
-class FormFoundryMVP:
-    def __init__(self) -> None:
-        self.pose = load_pose_landmarker()
-        self.yolo = load_yolo()
-        self.backbone_name = "swin_tiny_patch4_window7_224"
-        self.backbone = load_material_backbone(self.backbone_name)
-
-    def detect_pose(self, rgb: np.ndarray) -> List[Lm]:
-        rgb = np.ascontiguousarray(rgb)
-        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
-        r = self.pose.detect(mp_image)
-        if not r.pose_landmarks:
-            return []
-        lms = r.pose_landmarks[0]
-        out: List[Lm] = []
-        for p in lms:
-            out.append(Lm(x=p.x, y=p.y, z=getattr(p, "z", 0.0), visibility=getattr(p, "visibility", 1.0)))
-        return out
-
-    def garment_classify(
-        self, lm: List[Lm], garment_mask: np.ndarray, skin_mask: np.ndarray
-    ) -> Tuple[str, Dict[str, float], str]:
-        h, w = garment_mask.shape[:2]
-        arm_ratio = arm_skin_exposure(skin_mask, lm, w, h)
-        hood = hood_score(garment_mask, skin_mask, lm, w, h)
-
-        # Decision rules (t-shirt 오판 줄이기: 팔 skin 우선)
-        if arm_ratio >= 0.08:
-            g = "Short Sleeve"
-            reason = f"Arm-skin exposure {arm_ratio*100:.0f}% (short sleeve prior)"
-        else:
-            if hood >= 0.38:
-                g = "Hoodie/Sweat"
-                reason = f"Hood/neck coverage score {hood:.2f} (hood prior)"
-            else:
-                g = "Long Sleeve"
-                reason = f"Low arm-skin {arm_ratio*100:.0f}% and no hood dominance (hood={hood:.2f})"
-
-        dbg = {"arm_skin_ratio": float(arm_ratio), "hood_score": float(hood)}
-        return g, dbg, reason
-
-    def material_infer(self, rgb: np.ndarray, garment_mask: np.ndarray, lm: List[Lm]) -> Dict[str, Any]:
-        h, w = rgb.shape[:2]
-
-        # ROI = torso bbox (shoulder~hip)
-        lsx, lsy = lm_xy(lm, 11, w, h)
-        rsx, rsy = lm_xy(lm, 12, w, h)
-        lhx, lhy = lm_xy(lm, 23, w, h)
-        rhx, rhy = lm_xy(lm, 24, w, h)
-
-        xa = max(0, min(lsx, rsx, lhx, rhx) - int(0.10 * w))
-        xb = min(w - 1, max(lsx, rsx, lhx, rhx) + int(0.10 * w))
-        ya = max(0, min(lsy, rsy) - int(0.02 * h))
-        yb = min(h - 1, max(lhy, rhy) + int(0.03 * h))
-
-        roi = rgb[ya:yb, xa:xb]
-        mroi = garment_mask[ya:yb, xa:xb]
-        if roi.size == 0:
-            roi = rgb[max(0, lsy - 60):min(h, lsy + 80), max(0, lsx - 80):min(w, lsx + 80)]
-            mroi = None
-
-        roi_masked = roi.copy()
-        if mroi is not None and mroi.size > 0:
-            roi_masked[mroi == 0] = 0
-
-        gray = cv2.cvtColor(roi_masked, cv2.COLOR_RGB2GRAY)
-        lap = float(cv2.Laplacian(gray, cv2.CV_64F).var())
-        rough_0_10 = float(np.clip(lap / 200.0, 0.0, 10.0))
-        v_ratio, h_ratio = sobel_wrinkle_ratios(gray)
-        hf = fft_highfreq_ratio(gray)
-
-        bb = backbone_signature(roi, self.backbone, device="cpu")
-
-        # thickness score (0..1)
-        thick_score = 0.50 * (rough_0_10 / 10.0) + 0.35 * hf + 0.15 * np.clip(bb["bb_feat_std"], 0.0, 1.0)
-        thick_score = float(np.clip(thick_score, 0.0, 1.0))
-
-        if thick_score >= 0.70:
-            thickness_level = "thick"
-            thickness_cm = 2.4
-            bucket = "knit/fleece"
-        elif thick_score >= 0.40:
-            thickness_level = "medium"
-            thickness_cm = 1.4
-            bucket = "cotton blend"
-        else:
-            thickness_level = "thin"
-            thickness_cm = 0.8
-            bucket = "smooth cotton/synthetic"
-
-        # confidence (MVP)
-        conf = float(np.clip(0.55 + 0.25 * abs(hf - 0.25) + 0.10 * (rough_0_10 / 10.0), 0.0, 0.95))
-
-        return {
-            "roi_rgb": roi,
-            "roughness_0_10": rough_0_10,
-            "wrinkle_v_ratio": float(v_ratio),
-            "wrinkle_h_ratio": float(h_ratio),
-            "fft_highfreq_ratio": float(hf),
-            "backbone": {"name": self.backbone_name, **bb},
-            "material_bucket": bucket,
-            "thickness_level": thickness_level,
-            "thickness_cm": float(thickness_cm),
-            "confidence": conf,
-        }
-
-    def fit_infer(self, mat: Dict[str, Any]) -> Tuple[str, Dict[str, float], str]:
-        v = float(mat["wrinkle_v_ratio"])
-        h = float(mat["wrinkle_h_ratio"])
-        hf = float(mat["fft_highfreq_ratio"])
-        rough = float(mat["roughness_0_10"])
-
-        if v >= 0.62 and hf >= 0.22:
-            fit = "Loose"
-            reason = f"Vertical drape dominates (v={v:.2f}) + highfreq wrinkles (hf={hf:.2f})"
-        elif h >= 0.58 and hf <= 0.22 and rough <= 4.8:
-            fit = "Tight"
-            reason = f"Horizontal tension dominates (h={h:.2f}) + smoother surface (hf={hf:.2f})"
-        else:
-            fit = "Regular"
-            reason = f"Balanced texture vectors (v={v:.2f}, h={h:.2f})"
-
-        dbg = {"v_ratio": v, "h_ratio": h, "hf_ratio": hf, "rough_0_10": rough}
-        return fit, dbg, reason
-
-    def estimate_body_torso_mask(self, person_mask: np.ndarray, lm: List[Lm], px_per_cm: float, width_deduct_cm: float) -> np.ndarray:
-        h, w = person_mask.shape[:2]
-        _, sh_y = lm_xy(lm, 11, w, h)
-        _, hip_y = lm_xy(lm, 23, w, h)
-        y1 = max(0, min(sh_y, hip_y) - int(0.03 * h))
-        y2 = min(h - 1, max(sh_y, hip_y) + int(0.06 * h))
-
-        torso = np.zeros_like(person_mask)
-        torso[y1:y2, :] = person_mask[y1:y2, :]
-
-        # width_deduct_cm 는 "전체 너비 감소" 개념 -> erosion radius는 절반
-        deduct_px = max(0, int(width_deduct_cm * px_per_cm))
-        radius = max(1, int(deduct_px / 2))
-        ksz = radius * 2 + 1
-        k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (ksz, ksz))
-        body = cv2.erode(torso, k, iterations=1)
-        return body
-
-    def measure(self, body_mask: np.ndarray, lm: List[Lm], height_cm: float) -> Tuple[Dict[str, Any], Dict[str, str]]:
-        h, w = body_mask.shape[:2]
-
-        px_per_cm, scale_dbg = estimate_px_per_cm(lm, w, h, height_cm)
-        rot_factor, rot_deg = rotation_compensation(lm)
-
-        center_x = int(((lm[23].x + lm[24].x) / 2) * w)
-
-        y_sh = int(((lm[11].y + lm[12].y) / 2) * h)
-        y_ch = int(((lm[11].y * 2 + lm[23].y) / 3) * h)
-        y_wa = int(((lm[11].y + lm[23].y * 2) / 3) * h)
-        y_hi = int(((lm[23].y + lm[24].y) / 2) * h)
-
-        sh_px = math.hypot((lm[11].x - lm[12].x) * w, (lm[11].y - lm[12].y) * h)
-        sh_cm = (sh_px / px_per_cm) + 1.2  # bias 줄임(1.5->1.2)
-
-        def width_cm_at(y: int) -> Tuple[float, int, int, int]:
-            wp, x1, x2 = width_run_at_y(body_mask, y, center_x)
-            if wp <= 0:
-                return 0.0, 0, 0, 0
-            wp_corr = int(wp * rot_factor)
-            return float(wp_corr / px_per_cm), x1, x2, wp_corr
-
-        ch_w_cm, ch_x1, ch_x2, ch_wp_corr = width_cm_at(y_ch)
-        wa_w_cm, wa_x1, wa_x2, wa_wp_corr = width_cm_at(y_wa)
-        hi_w_cm, hi_x1, hi_x2, hi_wp_corr = width_cm_at(y_hi)
-
-        chest = ch_w_cm * CIRC_RATIO_CHEST
-        waist = wa_w_cm * CIRC_RATIO_WAIST
-        hip = hi_w_cm * CIRC_RATIO_HIP
-
-        def dist(i1: int, i2: int) -> float:
-            return math.hypot((lm[i1].x - lm[i2].x) * w, (lm[i1].y - lm[i2].y) * h)
-
-        arm = (dist(11, 13) + dist(13, 15) + dist(12, 14) + dist(14, 16)) / 2 / px_per_cm
-        leg = (dist(23, 25) + dist(25, 27) + dist(24, 26) + dist(26, 28)) / 2 / px_per_cm
-
-        meas = {
-            "px_per_cm": float(px_per_cm),
-            "rotation_deg": float(rot_deg),
-            "scale_dbg": scale_dbg,
-            "lines": {
-                "y_chest": y_ch, "y_waist": y_wa, "y_hip": y_hi,
-                "ch_x1": ch_x1, "ch_x2": ch_x2,
-                "wa_x1": wa_x1, "wa_x2": wa_x2,
-                "hi_x1": hi_x1, "hi_x2": hi_x2,
-            },
-            "meas_cm": {
-                "Shoulder_Width": float(sh_cm),
-                "Chest_Circ": float(chest),
-                "Waist_Circ": float(waist),
-                "Hip_Circ": float(hip),
-                "Arm_Length": float(arm),
-                "Leg_Length": float(leg),
-            }
-        }
-
-        explain = {
-            "Shoulder_Width": (
-                f"Module02(Pose): dist(shoulder11-12)={sh_px:.0f}px ÷ px_per_cm({px_per_cm:.2f}) + bias(1.2cm). "
-                f"Scale uses mix(span+geodesic) + weak shoulder sanity."
-            ),
-            "Chest_Circ": (
-                f"Module05(BodyMask): at y_chest, center-run width={ch_wp_corr}px ÷ px_per_cm({px_per_cm:.2f}) "
-                f"→ width_cm({ch_w_cm:.1f}) × ratio({CIRC_RATIO_CHEST}). "
-                f"Arms excluded by center-run; rotation corrected."
-            ),
-            "Waist_Circ": (
-                f"Module05(BodyMask): at y_waist, center-run width={wa_wp_corr}px ÷ px_per_cm({px_per_cm:.2f}) "
-                f"→ width_cm({wa_w_cm:.1f}) × ratio({CIRC_RATIO_WAIST})."
-            ),
-            "Hip_Circ": (
-                f"Module05(BodyMask): at y_hip, center-run width={hi_wp_corr}px ÷ px_per_cm({px_per_cm:.2f}) "
-                f"→ width_cm({hi_w_cm:.1f}) × ratio({CIRC_RATIO_HIP})."
-            ),
-            "Arm_Length": (
-                f"Module02(Pose): avg(LS arm + RS arm) "
-                f"= (dist(11-13)+dist(13-15)+dist(12-14)+dist(14-16))/2 ÷ px_per_cm({px_per_cm:.2f})."
-            ),
-            "Leg_Length": (
-                f"Module02(Pose): avg(hip-knee-ankle left/right) "
-                f"= (dist(23-25)+dist(25-27)+dist(24-26)+dist(26-28))/2 ÷ px_per_cm({px_per_cm:.2f})."
-            ),
-        }
-        return meas, explain
-
-    def render_overlay(
-        self,
-        rgb: np.ndarray,
-        lm: List[Lm],
-        person_mask: np.ndarray,
-        garment_mask: np.ndarray,
-        body_mask: np.ndarray,
-        meas: Dict[str, Any],
-    ) -> Dict[str, np.ndarray]:
-        h, w = rgb.shape[:2]
-        base = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
-
-        # Person overlay (blue-ish) + Garment overlay (green)
-        person_col = np.zeros_like(base); person_col[:] = (255, 120, 0)   # BGR
-        garment_col = np.zeros_like(base); garment_col[:] = (0, 255, 0)
-
-        pm = (person_mask.astype(np.uint8) * 255)
-        gm = (garment_mask.astype(np.uint8) * 255)
-
-        person_col_masked = cv2.bitwise_and(person_col, person_col, mask=pm)
-        garment_col_masked = cv2.bitwise_and(garment_col, garment_col, mask=gm)
-
-        base = cv2.addWeighted(base, 1.0, person_col_masked, 0.16, 0)
-        base = cv2.addWeighted(base, 1.0, garment_col_masked, 0.20, 0)
-
-        # Body contour (red)
-        cnt = largest_contour(body_mask)
-        if cnt is not None and cv2.contourArea(cnt) > 2000:
-            cv2.drawContours(base, [cnt], -1, (0, 0, 255), 3, cv2.LINE_AA)
-
-        # Skeleton
-        draw_skeleton(base, lm)
-
-        # Measurement lines
-        L = meas["lines"]
-        font = cv2.FONT_HERSHEY_SIMPLEX
-
-        def line(y: int, x1: int, x2: int, label: str, color: Tuple[int, int, int]) -> None:
-            if x2 > x1 > 0 and 0 <= y < h:
-                cv2.line(base, (x1, y), (x2, y), color, 3, cv2.LINE_AA)
-                cv2.putText(base, label, (min(x2 + 8, w - 1), max(18, y - 6)), font, 0.65, color, 2, cv2.LINE_AA)
-
-        line(L["y_chest"], L["ch_x1"], L["ch_x2"], "Chest", (0, 255, 255))
-        line(L["y_waist"], L["wa_x1"], L["wa_x2"], "Waist", (255, 0, 255))
-        line(L["y_hip"], L["hi_x1"], L["hi_x2"], "Hip", (0, 255, 0))
-
-        overlay_rgb = cv2.cvtColor(base, cv2.COLOR_BGR2RGB)
-
-        def to_rgb_mask(m: np.ndarray) -> np.ndarray:
-            return np.stack([m * 255, m * 255, m * 255], axis=-1).astype(np.uint8)
-
-        masks_rgb = np.concatenate(
-            [to_rgb_mask(person_mask), to_rgb_mask(garment_mask), to_rgb_mask(body_mask)], axis=1
-        )
-        return {"overlay": overlay_rgb, "masks": masks_rgb}
-
-    def process(self, image_file: Any, height_cm: float) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
-        rgb = pil_to_rgb(Image.open(image_file))
-        h, w = rgb.shape[:2]
-
-        # Module 02: Pose
-        lm = self.detect_pose(rgb)
-        if len(lm) < 33:
-            return None, "PoseLandmarker failed: 전신/포즈 인식이 불안정합니다. 더 밝은 배경/전신 프레이밍으로 재시도하세요."
-
-        # Module 03: Person Seg
-        person_mask, yolo_conf = yolo_person_mask(rgb, self.yolo)
-        if person_mask.sum() < 5000:
-            return None, "YOLO person segmentation 실패: 인물이 충분히 크게 나오거나 배경 대비가 있는 사진으로 재시도하세요."
-
-        # Skin vs garment (person - skin)
-        skin_mask, skin_stats = build_adaptive_skin_mask(rgb, person_mask, lm)
-        garment_mask = cv2.bitwise_and(person_mask, (1 - skin_mask).astype(np.uint8))
-        k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
-        garment_mask = cv2.morphologyEx(garment_mask, cv2.MORPH_CLOSE, k, iterations=2)
-
-        # Module 04: Material
-        mat = self.material_infer(rgb, garment_mask, lm)
-        fit, fit_dbg, fit_reason = self.fit_infer(mat)
-
-        # Garment class
-        garment_class, g_dbg, g_reason = self.garment_classify(lm, garment_mask, skin_mask)
-
-        # Width deduction (Module 05)
-        base_d = GARMENT_DB[garment_class]["base_width_deduct_cm"]
-        ease_d = FIT_DB[fit]["ease_width_deduct_cm"]
-
-        # 소재 두께는 "추정치"라 영향 더 줄임(0.35 -> 0.15)
-        mat_d = float(mat["thickness_cm"] * 0.15)
-
-        width_deduct_cm = float(base_d + ease_d + mat_d)
-
-        # 반팔이면 과도 deduction을 제한(데모에서 제일 튀는 포인트)
-        if garment_class == "Short Sleeve":
-            width_deduct_cm = min(width_deduct_cm, 1.2)
-
-        # scale
-        px_per_cm, scale_dbg = estimate_px_per_cm(lm, w, h, height_cm)
-
-        # body mask estimate
-        body_mask = self.estimate_body_torso_mask(person_mask, lm, px_per_cm, width_deduct_cm)
-
-        # measurements + per-metric explain
-        meas, explain = self.measure(body_mask, lm, height_cm)
-
-        # overlay
-        renders = self.render_overlay(rgb, lm, person_mask, garment_mask, body_mask, meas)
-
-        # reasoning (for expander)
-        reasoning = {
-            "module_02_pose": {
-                "landmarks": 33,
-                "rotation_deg": float(meas["rotation_deg"]),
-                "scale_dbg": scale_dbg,
-            },
-            "module_03_seg": {
-                "yolo_person_conf": float(yolo_conf),
-                "person_area_px": float(person_mask.sum()),
-                "garment_area_px": float(garment_mask.sum()),
-                "skin_area_px": float(skin_mask.sum()),
-                "skin_stats": skin_stats,
-            },
-            "module_04_material": {
-                "bucket": mat["material_bucket"],
-                "thickness_level": mat["thickness_level"],
-                "thickness_cm": mat["thickness_cm"],
-                "confidence": mat["confidence"],
-                "roughness_0_10": mat["roughness_0_10"],
-                "fft_highfreq_ratio": mat["fft_highfreq_ratio"],
-                "wrinkle_v_ratio": mat["wrinkle_v_ratio"],
-                "wrinkle_h_ratio": mat["wrinkle_h_ratio"],
-                "backbone": mat["backbone"],
-            },
-            "module_05_offset": {
-                "garment_class": garment_class,
-                "garment_reason": g_reason,
-                "garment_debug": g_dbg,
-                "fit": fit,
-                "fit_reason": fit_reason,
-                "fit_debug": fit_dbg,
-                "base_width_deduct_cm": base_d,
-                "ease_width_deduct_cm": ease_d,
-                "material_width_deduct_cm": mat_d,
-                "width_deduct_cm_used": width_deduct_cm,
-            },
-        }
-
-        return {
-            "overlay": renders["overlay"],
-            "masks": renders["masks"],
-            "roi": mat["roi_rgb"],
-            "garment_class": garment_class,
-            "garment_reason": g_reason,
-            "fit": fit,
-            "fit_reason": fit_reason,
-            "material_bucket": mat["material_bucket"],
-            "material_conf": mat["confidence"],
-            "deduct_cm": width_deduct_cm,
-            "meas_cm": meas["meas_cm"],
-            "rotation_deg": meas["rotation_deg"],
-            "reasoning": reasoning,
-            "explain": explain,
-        }, None
-
-
-# =========================================================
-# Streamlit UI
-# =========================================================
-st.set_page_config(layout="wide", page_title="FormFoundry MVP — Modules 02/03/04/05")
-
-st.markdown(
-    """
+}
+</script>
 <style>
-  .card { background-color: #141414; border: 1px solid #2a2a2a; padding: 14px; border-radius: 10px; margin-bottom: 10px; }
-  .card-title { color: #8b8b8b; font-size: 12px; text-transform: uppercase; letter-spacing: 0.7px; margin-bottom: 6px; }
-  .card-value { color: #ffffff; font-size: 22px; font-weight: 700; }
-  .card-sub { color: #b8b8b8; font-size: 13px; line-height: 1.35; }
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Outfit', sans-serif; background: #0a0a0f; color: #e5e7eb; }
+.glow { filter: drop-shadow(0 0 24px rgba(0,212,255,0.35)); }
+@keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-12px); } }
+.float { animation: float 6s ease-in-out infinite; }
+@keyframes pulse-ring { 0% { transform: scale(0.9); opacity: 1; } 100% { transform: scale(1.5); opacity: 0; } }
+.pulse-ring { animation: pulse-ring 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+.grid-bg {
+background-image:
+linear-gradient(to right, rgba(0,212,255,0.03) 1px, transparent 1px),
+linear-gradient(to bottom, rgba(0,212,255,0.03) 1px, transparent 1px);
+background-size: 48px 48px;
+}
+code { font-family: 'JetBrains Mono', monospace; background: rgba(0,212,255,0.08); padding: 2px 8px; border-radius: 4px; font-size: 0.9em; }
+.reveal { opacity: 0; transform: translateY(24px); transition: all 0.8s cubic-bezier(0.16, 1, 0.3, 1); }
+.reveal.active { opacity: 1; transform: translateY(0); }
+
+/* 스크롤바 숨기기 (깔끔한 UI 위해) */
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+/* Navigation styles */
+.nav-link {
+position: relative;
+transition: color 0.3s ease;
+}
+
+.nav-link::after {
+content: '';
+position: absolute;
+bottom: -4px;
+left: 0;
+width: 0;
+height: 2px;
+background: linear-gradient(90deg, #4F9DFF, #9B6FFF);
+transition: width 0.3s ease;
+}
+
+.nav-link:hover::after,
+.nav-link.active::after {
+width: 100%;
+}
+
+.nav-link:hover {
+color: #4F9DFF;
+}
+
+/* Mobile menu */
+.mobile-menu {
+transform: translateX(100%);
+transition: transform 0.3s ease;
+}
+
+.mobile-menu.open {
+transform: translateX(0);
+}
+
+/* Header backdrop blur on scroll */
+header.scrolled {
+background: rgba(11, 15, 26, 0.85);
+backdrop-filter: blur(20px);
+}
 </style>
-""",
-    unsafe_allow_html=True,
-)
+</head>
+<body class="antialiased">
 
-st.title("FormFoundry MVP — Pose • Segmentation • Material(ViT/Swin) • Volume-Offset")
-st.caption("Module 02/03/04/05를 모두 실제 실행. 각 수치별 계산 근거를 Body Specs 카드 아래에 텍스트로 표시합니다.")
-
-with st.sidebar:
-    st.header("Config")
-    height_cm = st.number_input("Height (cm)", 150, 210, 182, step=1)
-    st.caption("Run locally:")
-    st.code("streamlit run app.py", language="bash")
-    st.caption("Pose model will auto-download into ./models/ on first run.")
-
-uploaded = st.file_uploader("Upload full-body image", type=["jpg", "jpeg", "png"])
-
-# init
-try:
-    engine = FormFoundryMVP()
-except Exception as e:
-    st.error("Engine initialization failed.")
-    st.code(str(e))
-    st.stop()
-
-if uploaded:
-    with st.spinner("Running full pipeline (02/03/04/05)..."):
-        time.sleep(0.15)
-        data, err = engine.process(uploaded, float(height_cm))
-
-    if err:
-        st.error(err)
-        st.stop()
-
-    col1, col2, col3 = st.columns([1.35, 0.95, 0.95])
-
-    with col1:
-        st.markdown("#### Visual Output")
-        t1, t2, t3 = st.tabs(["Overlay", "Masks", "ROI"])
-        with t1:
-            st.image(
-                data["overlay"],
-                use_container_width=True,
-                caption="Overlay: Person(blue) + Garment(green) + Body contour(red) + Skeleton + Measure lines",
-            )
-        with t2:
-            st.image(
-                data["masks"],
-                use_container_width=True,
-                caption="Masks: Person | Garment(person-skin) | Body estimate (erosion offset)",
-            )
-        with t3:
-            st.image(data["roi"], use_container_width=True, caption="Torso ROI (Material inference input)")
-
-    with col2:
-        st.markdown("#### Module Summary (시연용)")
-        rot = data["rotation_deg"]
-        deduct = data["deduct_cm"]
-
-        st.markdown(
-            f"""
-<div class="card">
-  <div class="card-title">Module 02 — Pose</div>
-  <div class="card-value">{rot:.1f}° rotation</div>
-  <div class="card-sub">Shoulder depth 기반 회전 보정값이 측정에 반영됩니다.</div>
+<!-- Navigation -->
+<header class="fixed top-0 left-0 right-0 z-50 border-b border-border transition-all duration-300">
+<div class="max-w-7xl mx-auto px-6 py-4">
+<div class="flex items-center justify-between">
+<!-- Logo -->
+<div class="flex items-center gap-3">
+<div class="w-10 h-10 rounded-xl bg-gradient-to-br from-accent to-accent-2 flex items-center justify-center font-bold text-deep">FFAI</div>
+<div>
+<div class="font-display font-bold text-lg text-white">FORM FOUNDRY AI</div>
+<div class="font-mono text-xs text-gray-500">Technical Architecture v1.0</div>
 </div>
-<div class="card">
-  <div class="card-title">Module 03 — Garment Class</div>
-  <div class="card-value">{data["garment_class"]}</div>
-  <div class="card-sub">{data["garment_reason"]}</div>
 </div>
-<div class="card">
-  <div class="card-title">Module 04 — Material (Swin 실행)</div>
-  <div class="card-value" style="font-size:18px;">{data["material_bucket"]}</div>
-  <div class="card-sub">confidence: {data["material_conf"]:.2f}</div>
+
+<!-- Desktop Navigation -->
+<nav class="hidden lg:flex items-center gap-6">
+<a href="#hero" class="nav-link text-sm font-medium text-gray-400">Home</a>
+<a href="#architecture" class="nav-link text-sm font-medium text-gray-400">Architecture</a>
+<a href="#modules" class="nav-link text-sm font-medium text-gray-400">Modules</a>
+<a href="#story" class="nav-link text-sm font-medium text-gray-400">Pipeline</a>
+<a href="#flywheel" class="nav-link text-sm font-medium text-gray-400">Data Flywheel</a>
+<a href="#validation" class="nav-link text-sm font-medium text-gray-400">Validation</a>
+<a href="#roadmap" class="nav-link text-sm font-medium text-gray-400">Roadmap</a>
+<a href="#faq" class="nav-link text-sm font-medium text-gray-400">FAQ</a>
+</nav>
+
+<!-- Mobile Menu Button -->
+<button id="mobileMenuBtn" class="lg:hidden w-10 h-10 flex items-center justify-center text-gray-400 hover:text-accent transition-colors">
+<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/>
+</svg>
+</button>
 </div>
-<div class="card">
-  <div class="card-title">Module 05 — Volume-Offset</div>
-  <div class="card-value">Width deduct: -{deduct:.1f} cm</div>
-  <div class="card-sub">의복/air-gap/소재 두께를 합산해 body contour를 안쪽으로 복원(erosion)합니다.</div>
 </div>
-""",
-            unsafe_allow_html=True,
-        )
+</header>
 
-        with st.expander("Demo용 상세 수치(원하면 펼치기)"):
-            st.json(data["reasoning"])
-
-    with col3:
-        st.markdown("#### Body Specs (Output)")
-        m = data["meas_cm"]
-        ex = data.get("explain", {})
-
-        def card(label: str, val: float, explain: str) -> None:
-            explain = explain or "-"
-            st.markdown(
-                f"""
-<div class="card">
-  <div class="card-title">{label}</div>
-  <div class="card-value">{val:.1f} cm</div>
-  <div class="card-sub"><b>Calculation:</b> {explain}</div>
+<!-- Mobile Menu -->
+<div id="mobileMenu" class="mobile-menu fixed top-0 right-0 bottom-0 w-full max-w-sm bg-surface border-l border-border z-50 lg:hidden">
+<div class="p-6">
+<div class="flex items-center justify-between mb-8">
+<span class="font-display font-bold text-lg">Menu</span>
+<button id="closeMobileMenu" class="w-10 h-10 flex items-center justify-center text-gray-400 hover:text-accent transition-colors">
+<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+</svg>
+</button>
 </div>
-""",
-                unsafe_allow_html=True,
-            )
 
-        card("Shoulder Width", m["Shoulder_Width"], ex.get("Shoulder_Width", ""))
-        card("Chest Circumference", m["Chest_Circ"], ex.get("Chest_Circ", ""))
-        card("Waist Circumference", m["Waist_Circ"], ex.get("Waist_Circ", ""))
-        card("Hip Circumference", m["Hip_Circ"], ex.get("Hip_Circ", ""))
+<nav class="space-y-2">
+<a href="#hero" class="mobile-nav-link block py-3 px-4 rounded-lg text-gray-400 hover:text-accent hover:bg-surface-2 transition-all">Home</a>
+<a href="#architecture" class="mobile-nav-link block py-3 px-4 rounded-lg text-gray-400 hover:text-accent hover:bg-surface-2 transition-all">Architecture</a>
+<a href="#modules" class="mobile-nav-link block py-3 px-4 rounded-lg text-gray-400 hover:text-accent hover:bg-surface-2 transition-all">Modules</a>
+<a href="#story" class="mobile-nav-link block py-3 px-4 rounded-lg text-gray-400 hover:text-accent hover:bg-surface-2 transition-all">Pipeline</a>
+<a href="#flywheel" class="mobile-nav-link block py-3 px-4 rounded-lg text-gray-400 hover:text-accent hover:bg-surface-2 transition-all">Data Flywheel</a>
+<a href="#validation" class="mobile-nav-link block py-3 px-4 rounded-lg text-gray-400 hover:text-accent hover:bg-surface-2 transition-all">Validation</a>
+<a href="#roadmap" class="mobile-nav-link block py-3 px-4 rounded-lg text-gray-400 hover:text-accent hover:bg-surface-2 transition-all">Roadmap</a>
+<a href="#faq" class="mobile-nav-link block py-3 px-4 rounded-lg text-gray-400 hover:text-accent hover:bg-surface-2 transition-all">FAQ</a>
+</nav>
+</div>
+</div>
+</header>
 
-        cA, cB = st.columns(2)
-        with cA:
-            card("Arm Length", m["Arm_Length"], ex.get("Arm_Length", ""))
-        with cB:
-            card("Leg Length", m["Leg_Length"], ex.get("Leg_Length", ""))
+<section id="hero" class="relative min-h-screen flex items-center justify-center overflow-hidden pt-20">
+<div class="absolute inset-0 grid-bg opacity-40"></div>
+<div class="absolute inset-0 bg-gradient-to-b from-transparent via-deep/50 to-deep"></div>
 
-        st.button("Save Profile (MVP)", type="primary", use_container_width=True)
+<div class="absolute top-1/4 left-1/4 w-96 h-96 bg-accent/5 rounded-full blur-3xl float"></div>
+<div class="absolute bottom-1/4 right-1/4 w-96 h-96 bg-accent-2/5 rounded-full blur-3xl float" style="animation-delay: -3s;"></div>
+
+<div class="relative z-10 max-w-5xl mx-auto px-6 text-center">
+<div class="inline-flex items-center gap-2 px-4 py-2 bg-surface-2 rounded-full border border-border mb-6">
+<span class="w-2 h-2 bg-success rounded-full pulse-ring"></span>
+<span class="text-sm font-mono text-gray-400">MIDDLEWARE ARCHITECTURE</span>
+</div>
+
+<h1 class="font-display font-bold text-5xl lg:text-7xl mb-6 leading-tight">
+<span class="text-gray-300">AI-Powered</span><br/>
+<span class="bg-gradient-to-r from-accent to-accent-2 bg-clip-text text-transparent">Fit Prediction Engine</span>
+</h1>
+
+<p class="text-xl text-gray-400 mb-8 max-w-3xl mx-auto leading-relaxed">
+Vision → Physics → 3D → GenAI<br/>
+<strong class="text-gray-300">Fashion-Specialized Neural Middleware</strong> trained on material-specific body deformation patterns
+</p>
+
+<div class="grid md:grid-cols-3 gap-6 mt-12 mb-12">
+<div class="bg-surface/50 backdrop-blur border border-border rounded-2xl p-6">
+<div class="text-3xl font-bold text-accent mb-2">Problem</div>
+<div class="text-gray-400">사이즈/핏 불만족 반품 (Target: 측정 예정)</div>
+</div>
+<div class="bg-surface/50 backdrop-blur border border-border rounded-2xl p-6">
+<div class="text-3xl font-bold text-accent-2 mb-2">Solution</div>
+<div class="text-gray-400">비전-물리 번역 미들웨어 + 합성 데이터 플라이휠</div>
+</div>
+<div class="bg-surface/50 backdrop-blur border border-border rounded-2xl p-6">
+<div class="text-3xl font-bold text-success mb-2">Validation</div>
+<div class="text-gray-400">Virtual vs. Real Photo Error Rate + User A/B Testing</div>
+</div>
+</div>
+
+<div class="flex flex-wrap gap-4 justify-center">
+<a href="#architecture" class="px-8 py-4 bg-gradient-to-r from-accent to-accent-2 rounded-xl font-semibold hover:shadow-lg hover:shadow-accent/30 transition-all">
+Architecture Overview
+</a>
+<a href="#modules" class="px-8 py-4 bg-surface border border-border rounded-xl font-semibold hover:border-accent transition-all">
+Deep-Dive Modules
+</a>
+</div>
+</div>
+</section>
+
+<section id="architecture" class="relative py-24 border-t border-border">
+<div class="max-w-7xl mx-auto px-6">
+<div class="mb-16 reveal">
+<div class="inline-flex items-center gap-2 px-4 py-2 bg-surface-2 rounded-full border border-border">
+<span class="w-2 h-2 bg-accent rounded-full"></span>
+<span class="text-sm font-mono text-gray-400">SYSTEM ARCHITECTURE</span>
+</div>
+<h2 class="font-display font-bold text-4xl mt-6">What we build</h2>
+<p class="text-gray-400 mt-3 text-lg">4-Layer Pipeline: Vision → Middleware → 3D → GenAI</p>
+</div>
+
+<div class="relative bg-surface/50 backdrop-blur border border-border rounded-3xl p-8 lg:p-12 reveal">
+<svg viewBox="0 0 1200 800" class="w-full h-auto">
+<defs>
+<linearGradient id="layerGrad1" x1="0" y1="0" x2="0" y2="1">
+<stop offset="0" stop-color="#00d4ff" stop-opacity="0.2"/>
+<stop offset="1" stop-color="#00d4ff" stop-opacity="0.05"/>
+</linearGradient>
+<linearGradient id="layerGrad2" x1="0" y1="0" x2="0" y2="1">
+<stop offset="0" stop-color="#7c3aed" stop-opacity="0.2"/>
+<stop offset="1" stop-color="#7c3aed" stop-opacity="0.05"/>
+</linearGradient>
+<linearGradient id="layerGrad3" x1="0" y1="0" x2="0" y2="1">
+<stop offset="0" stop-color="#10b981" stop-opacity="0.2"/>
+<stop offset="1" stop-color="#10b981" stop-opacity="0.05"/>
+</linearGradient>
+<linearGradient id="layerGrad4" x1="0" y1="0" x2="0" y2="1">
+<stop offset="0" stop-color="#f59e0b" stop-opacity="0.2"/>
+<stop offset="1" stop-color="#f59e0b" stop-opacity="0.05"/>
+</linearGradient>
+<marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto">
+<polygon points="0,0 10,5 0,10" fill="#00d4ff"/>
+</marker>
+</defs>
+
+<g transform="translate(60, 50)">
+<rect width="260" height="160" rx="20" fill="url(#layerGrad1)" stroke="#00d4ff" stroke-width="2"/>
+<text x="130" y="35" text-anchor="middle" font-family="Outfit" font-weight="700" font-size="18" fill="#00d4ff">Layer 1: Vision</text>
+<text x="20" y="65" font-family="JetBrains Mono" font-size="13" fill="#e5e7eb">• PnP Calibration</text>
+<text x="20" y="90" font-family="JetBrains Mono" font-size="13" fill="#e5e7eb">• MediaPipe (33 keypoints)</text>
+<text x="20" y="115" font-family="JetBrains Mono" font-size="13" fill="#e5e7eb">• YOLOv8-seg</text>
+<text x="20" y="140" font-family="JetBrains Mono" font-size="13" fill="#e5e7eb">• ViT / Swin (material)</text>
+</g>
+
+<g transform="translate(420, 50)">
+<rect width="320" height="160" rx="20" fill="url(#layerGrad2)" stroke="#7c3aed" stroke-width="3"/>
+<text x="160" y="35" text-anchor="middle" font-family="Outfit" font-weight="700" font-size="18" fill="#7c3aed">Layer 2: Middleware ★</text>
+<text x="20" y="65" font-family="JetBrains Mono" font-size="13" fill="#e5e7eb">• Deformation Engine</text>
+<text x="20" y="90" font-family="JetBrains Mono" font-size="13" fill="#e5e7eb">• Volume-Offset Logic</text>
+<text x="20" y="115" font-family="JetBrains Mono" font-size="13" fill="#e5e7eb">• Synthetic Data Factory</text>
+<text x="20" y="140" font-family="JetBrains Mono" font-size="12" fill="#9ca3af">(Vision-Physics Translation)</text>
+</g>
+
+<g transform="translate(60, 290)">
+<rect width="260" height="160" rx="20" fill="url(#layerGrad3)" stroke="#10b981" stroke-width="2"/>
+<text x="130" y="35" text-anchor="middle" font-family="Outfit" font-weight="700" font-size="18" fill="#10b981">Layer 3: 3D Engine</text>
+<text x="20" y="65" font-family="JetBrains Mono" font-size="13" fill="#e5e7eb">• SMPL-X (body mesh)</text>
+<text x="20" y="90" font-family="JetBrains Mono" font-size="13" fill="#e5e7eb">• IK (pose sync)</text>
+<text x="20" y="115" font-family="JetBrains Mono" font-size="13" fill="#e5e7eb">• CLO3D API/RPA</text>
+<text x="20" y="140" font-family="JetBrains Mono" font-size="13" fill="#e5e7eb">• Physics simulation</text>
+</g>
+
+<g transform="translate(420, 290)">
+<rect width="320" height="160" rx="20" fill="url(#layerGrad4)" stroke="#f59e0b" stroke-width="2"/>
+<text x="160" y="35" text-anchor="middle" font-family="Outfit" font-weight="700" font-size="18" fill="#f59e0b">Layer 4: GenAI Synthesis</text>
+<text x="20" y="65" font-family="JetBrains Mono" font-size="13" fill="#e5e7eb">• SDXL (Stable Diffusion)</text>
+<text x="20" y="90" font-family="JetBrains Mono" font-size="13" fill="#e5e7eb">• ControlNet (Edge/Depth)</text>
+<text x="20" y="115" font-family="JetBrains Mono" font-size="13" fill="#e5e7eb">• Photoreal composition</text>
+<text x="20" y="140" font-family="JetBrains Mono" font-size="12" fill="#9ca3af">(Fit-consistent render)</text>
+</g>
+
+<path d="M 320,130 L 420,130" stroke="#00d4ff" stroke-width="3" marker-end="url(#arrow)" opacity="0.8"/>
+<path d="M 580,210 L 580,290" stroke="#7c3aed" stroke-width="3" marker-end="url(#arrow)" opacity="0.8"/>
+<path d="M 320,370 L 420,370" stroke="#10b981" stroke-width="3" marker-end="url(#arrow)" opacity="0.8"/>
+
+<g transform="translate(820, 100)">
+<rect width="320" height="320" rx="20" fill="#12121a" stroke="#2a2a38" stroke-width="2"/>
+<text x="160" y="35" text-anchor="middle" font-family="Outfit" font-weight="700" font-size="16" fill="#9ca3af">Data Flow</text>
+
+<text x="20" y="70" font-family="JetBrains Mono" font-size="12" fill="#00d4ff">Input:</text>
+<text x="20" y="90" font-family="JetBrains Mono" font-size="11" fill="#9ca3af">- 1 photo (frontal/side)</text>
+<text x="20" y="110" font-family="JetBrains Mono" font-size="11" fill="#9ca3af">- Reference object (A4, etc)</text>
+
+<text x="20" y="145" font-family="JetBrains Mono" font-size="12" fill="#7c3aed">Middleware Output:</text>
+<text x="20" y="165" font-family="JetBrains Mono" font-size="11" fill="#9ca3af">- body dimensions (mm)</text>
+<text x="20" y="185" font-family="JetBrains Mono" font-size="11" fill="#9ca3af">- material properties</text>
+<text x="20" y="205" font-family="JetBrains Mono" font-size="11" fill="#9ca3af">- warm-start params</text>
+
+<text x="20" y="240" font-family="JetBrains Mono" font-size="12" fill="#10b981">3D Output:</text>
+<text x="20" y="260" font-family="JetBrains Mono" font-size="11" fill="#9ca3af">- draped garment mesh</text>
+<text x="20" y="280" font-family="JetBrains Mono" font-size="11" fill="#9ca3af">- edge/depth maps</text>
+
+<text x="20" y="310" font-family="JetBrains Mono" font-size="12" fill="#f59e0b">Final:</text>
+<text x="160" y="310" font-family="JetBrains Mono" font-size="11" fill="#e5e7eb">Photoreal image</text>
+</g>
+
+<rect x="410" y="40" width="340" height="180" rx="24" fill="none" stroke="#7c3aed" stroke-width="3" stroke-dasharray="12 8" opacity="0.6"/>
+<text x="580" y="240" text-anchor="middle" font-family="JetBrains Mono" font-size="13" fill="#7c3aed">독자 기술 영역 (Proprietary)</text>
+</svg>
+
+<div class="mt-12 grid md:grid-cols-2 gap-6">
+<div class="bg-deep border border-border rounded-xl p-6">
+<h4 class="font-display font-bold text-lg mb-3 text-accent">핵심 차별점</h4>
+<ul class="space-y-2 text-sm text-gray-400">
+<li>• 2D 워핑(warping) 방식 대비: 실측 치수 기반 3D 정확도 목표</li>
+<li>• 범용 가상피팅 대비: 소재별 변형 학습을 통한 핏 일관성 목표</li>
+<li>• 미들웨어 분리 설계: 비전-물리 번역 레이어를 독립 모듈화</li>
+</ul>
+</div>
+<div class="bg-deep border border-border rounded-xl p-6">
+<h4 class="font-display font-bold text-lg mb-3 text-accent-2">검증 방향 (PoC)</h4>
+<ul class="space-y-2 text-sm text-gray-400">
+<li>• 반품률 감소 (사이즈/핏 불만족 사유 중심 측정 예정)</li>
+<li>• 가상피팅 전환율 (A/B 테스트 설계 중)</li>
+<li>• 처리시간 (배치 자동화 목표, 정확도 측정 예정)</li>
+</ul>
+</div>
+</div>
+</div>
+</div>
+</section>
+<!-- Deep-Dive Modules -->
+<section id="modules" class="relative py-24 border-t border-border">
+<div class="max-w-7xl mx-auto px-6">
+<div class="mb-16 reveal">
+<div class="inline-flex items-center gap-2 px-4 py-2 bg-surface-2 rounded-full border border-border">
+<span class="w-2 h-2 bg-accent-2 rounded-full"></span>
+<span class="text-sm font-mono text-gray-400">TECHNICAL DEEP-DIVE</span>
+</div>
+<h2 class="font-display font-bold text-4xl mt-6">Module-by-Module Breakdown</h2>
+<p class="text-gray-400 mt-3 text-lg">각 모듈의 입력·출력·핵심 아이디어·설계 의도 상세 설명</p>
+</div>
+
+<div class="grid lg:grid-cols-2 gap-6">
+<!-- Module 1: PnP -->
+<div class="bg-surface border border-border rounded-2xl p-8 hover:border-accent transition-all reveal">
+<div class="flex items-start justify-between mb-4">
+<h3 class="font-display font-bold text-2xl">PnP & Homography
+정밀 측정 시스템</h3>
+<span class="font-mono text-sm text-accent">Module 01</span>
+</div>
+<p class="text-gray-400 mb-6">참조 객체(Reference Object)를 이용해 카메라-피사체 간 거리 및 초점거리를 추정하고, 픽셀 단위를 실측 mm 단위로 변환하는 스케일링 기반 구축.</p>
+
+<div class="space-y-4">
+<div>
+<div class="font-mono text-xs text-gray-500 mb-1">WHY (목적)</div>
+<div class="text-sm text-gray-300">단일 사진에서 정확한 신체 치수 복원을 위해서는 픽셀→mm 변환 계수가 필수. 범용 카메라 환경에서도 일관된 스케일 기준을 확보.</div>
+</div>
+<div>
+<div class="font-mono text-xs text-gray-500 mb-1">INPUTS</div>
+<div class="text-sm text-gray-300">사진 내 알려진 크기의 참조 객체(A4 용지, 마커 등), 객체 4개 코너의 2D 좌표</div>
+</div>
+<div>
+<div class="font-mono text-xs text-gray-500 mb-1">OUTPUTS</div>
+<div class="text-sm text-gray-300"><code>scale_factor</code> (px/mm), <code>camera_pose</code> (회전/거리 추정치)</div>
+</div>
+<div>
+<div class="font-mono text-xs text-gray-500 mb-1">CORE IDEA</div>
+<div class="text-sm text-gray-300">Perspective-n-Point 알고리즘으로 3D-2D 대응점 기반 카메라 외부 파라미터 계산. Homography 변환으로 평면 왜곡 보정.</div>
+</div>
+<div class="bg-deep rounded-xl p-4 border border-border">
+<div class="font-mono text-xs text-gray-500 mb-2">Pseudo-code (concept)</div>
+<pre class="font-mono text-xs text-accent overflow-x-auto">
+ref_points_3D = [(0,0,0), (210,0,0), (210,297,0), (0,297,0)] # A4 mm
+ref_points_2D = detect_corners(image)
+camera_matrix = estimate_camera_intrinsics()
+ret, rvec, tvec = cv2.solvePnP(ref_points_3D, ref_points_2D, camera_matrix, None)
+scale_factor = compute_scale(rvec, tvec)
+</pre>
+</div>
+<div>
+<div class="font-mono text-xs text-gray-500 mb-1">INTERFACE</div>
+<div class="text-sm text-gray-300">다음 단계(MediaPipe, YOLO)에서 추출된 픽셀 좌표를 mm로 변환하는 기반 제공</div>
+</div>
+</div>
+</div>
+
+<!-- Module 2: MediaPipe -->
+<div class="bg-surface border border-border rounded-2xl p-8 hover:border-accent transition-all reveal">
+<div class="flex items-start justify-between mb-4">
+<h3 class="font-display font-bold text-2xl">MediaPipe Pose & OpenCV</h3>
+<span class="font-mono text-sm text-accent">Module 02</span>
+</div>
+<p class="text-gray-400 mb-6">33개 관절 랜드마크(Landmark)를 추출하여 2D 포즈 데이터를 확보. 이후 IK(Inverse Kinematics) 단계에서 3D 아바타 포즈를 동기화하는 입력으로 사용. OpenCV로 랜드마크 간 거리/각도 계산하여 측정 피처 생성</p>
+
+<div class="space-y-4">
+<div>
+<div class="font-mono text-xs text-gray-500 mb-1">WHY</div>
+<div class="text-sm text-gray-300">유저의 실제 포즈를 3D 아바타에 반영하려면 관절 위치 정보가 필요. MediaPipe는 실시간 추론 가능한 경량 모델.</div>
+</div>
+<div>
+<div class="font-mono text-xs text-gray-500 mb-1">INPUTS</div>
+<div class="text-sm text-gray-300">RGB 이미지 (전신 포함)</div>
+</div>
+<div>
+<div class="font-mono text-xs text-gray-500 mb-1">OUTPUTS</div>
+<div class="text-sm text-gray-300">33개 랜드마크 좌표 <code>{x, y, z, visibility}</code> (z는 상대적 깊이 힌트)</div>
+</div>
+<div>
+<div class="font-mono text-xs text-gray-500 mb-1">CORE IDEA</div>
+<div class="text-sm text-gray-300">BlazePose 아키텍처 기반. Heatmap regression + offset refinement로 관절 위치 예측.</div>
+</div>
+<div class="bg-deep rounded-xl p-4 border border-border">
+<div class="font-mono text-xs text-gray-500 mb-2">Data schema (example)</div>
+<pre class="font-mono text-xs text-accent overflow-x-auto">
+{
+"landmarks": [
+{"id": 0, "name": "nose", "x": 0.51, "y": 0.23, "z": -0.12, "visibility": 0.98},
+{"id": 11, "name": "left_shoulder", "x": 0.42, "y": 0.35, "z": -0.08, "visibility": 0.95},
+...
+]
+}
+</pre>
+</div>
+<div>
+<div class="font-mono text-xs text-gray-500 mb-1">INTERFACE</div>
+<div class="text-sm text-gray-300">IK 모듈로 2D 좌표 전달 → 3D 회전값 변환 → SMPL-X 아바타 포즈 적용</div>
+</div>
+</div>
+</div>
+
+<!-- Module 3: YOLOv8-seg -->
+<div class="bg-surface border border-border rounded-2xl p-8 hover:border-accent transition-all reveal">
+<div class="flex items-start justify-between mb-4">
+<h3 class="font-display font-bold text-2xl">YOLOv8 Segmentation</h3>
+<span class="font-mono text-sm text-accent">Module 03</span>
+</div>
+<p class="text-gray-400 mb-6">인물 영역과 의복 영역을 픽셀 단위로 분리(Instance Segmentation)하고, 의복 카테고리를 분류. 이후 Material Inference 및 Volume-Offset 단계에서 ROI(Region of Interest)로 활용.</p>
+
+<div class="space-y-4">
+<div>
+<div class="font-mono text-xs text-gray-500 mb-1">WHY</div>
+<div class="text-sm text-gray-300">체형 복원 시 의복 영역을 배제해야 정확한 신체 외곽선 추정 가능. 카테고리 정보는 소재 추론의 컨텍스트로 사용.</div>
+</div>
+<div>
+<div class="font-mono text-xs text-gray-500 mb-1">INPUTS</div>
+<div class="text-sm text-gray-300">RGB 이미지, (학습 시) 어노테이션된 마스크 + 카테고리 라벨</div>
+</div>
+<div>
+<div class="font-mono text-xs text-gray-500 mb-1">OUTPUTS</div>
+<div class="text-sm text-gray-300"><code>mask</code> (binary segmentation), <code>bbox</code> (bounding box), <code>category</code> (hoodie/t-shirt/pants 등), <code>confidence</code> (측정 예정)</div>
+</div>
+<div>
+<div class="font-mono text-xs text-gray-500 mb-1">CORE IDEA</div>
+<div class="text-sm text-gray-300">YOLOv8 아키텍처에 instance segmentation head 추가. FPN 기반 multi-scale feature 활용.</div>
+</div>
+<div class="bg-deep rounded-xl p-4 border border-border">
+<div class="font-mono text-xs text-gray-500 mb-2">Pseudo-code (inference)</div>
+<pre class="font-mono text-xs text-accent overflow-x-auto">
+model = YOLO('yolov8-seg.pt')
+results = model.predict(image, conf=0.5)
+for result in results:
+mask = result.masks.data # binary mask
+category = result.names[result.boxes.cls]
+bbox = result.boxes.xyxy
+# pass mask, category to material inference
+</pre>
+</div>
+<div>
+<div class="font-mono text-xs text-gray-500 mb-1">INTERFACE</div>
+<div class="text-sm text-gray-300">마스크 영역 → Material Inference 입력, 카테고리 → 소재 추론 우선순위 조정, 외곽선 → Volume-Offset 계산 기준</div>
+</div>
+</div>
+</div>
+
+<!-- Module 4: Material Inference -->
+<div class="bg-surface border border-border rounded-2xl p-8 hover:border-accent transition-all reveal">
+<div class="flex items-start justify-between mb-4">
+<h3 class="font-display font-bold text-2xl">Material Inference (ViT/Swin)</h3>
+<span class="font-mono text-sm text-accent">Module 04</span>
+</div>
+<p class="text-gray-400 mb-6">의복 ROI 내 주름(Wrinkle) 주파수, 음영(Shadow) 패턴을 분석하여 소재의 두께(Thickness), 강성(Stiffness), 밀도(Density) 특성을 확률적으로 추정. 물리 시뮬레이션 파라미터 설정의 기초 정보 제공.</p>
+
+<div class="space-y-4">
+<div>
+<div class="font-mono text-xs text-gray-500 mb-1">WHY</div>
+<div class="text-sm text-gray-300">동일 체형이라도 소재에 따라 핏이 크게 달라짐(예: 면 티셔츠 vs 니트 스웨터). 2D 이미지만으로 소재 특성을 역추론하여 시뮬레이션 정확도 향상 목표.</div>
+</div>
+<div>
+<div class="font-mono text-xs text-gray-500 mb-1">INPUTS</div>
+<div class="text-sm text-gray-300">의복 ROI 패치, 카테고리 컨텍스트(YOLO 출력)</div>
+</div>
+<div>
+<div class="font-mono text-xs text-gray-500 mb-1">OUTPUTS</div>
+<div class="text-sm text-gray-300"><code>material_bucket</code> (cotton/polyester/knit 등 클래스), <code>thickness_level</code> (thin/medium/thick), <code>confidence_score</code> (측정 예정)</div>
+</div>
+<div>
+<div class="font-mono text-xs text-gray-500 mb-1">CORE IDEA</div>
+<div class="text-sm text-gray-300">Vision Transformer(ViT) 또는 Swin Transformer 기반. 주름 패턴을 frequency domain으로 분석(FFT 힌트), 음영 분포로 재질 밀도 추정. 학습 데이터는 CLO3D 합성 이미지 + 실제 소재 라벨 조합.</div>
+</div>
+<div class="bg-deep rounded-xl p-4 border border-border">
+<div class="font-mono text-xs text-gray-500 mb-2">Concept (pseudo-logic)</div>
+<pre class="font-mono text-xs text-accent overflow-x-auto">
+roi_patch = extract_roi(image, mask)
+features = vit_model.encode(roi_patch)
+wrinkle_freq = fft_analysis(roi_patch) # concept: frequency hint
+material_logits = classifier_head(features, wrinkle_freq)
+material_bucket = argmax(material_logits) # e.g., "cotton_medium_thick"
+</pre>
+</div>
+<div>
+<div class="font-mono text-xs text-gray-500 mb-1">INTERFACE</div>
+<div class="text-sm text-gray-300">추론된 소재 정보 → Deformation Engine 입력 (학습된 변형 패턴 선택), Volume-Offset 두께 차감 계수 결정</div>
+</div>
+</div>
+</div>
+
+<!-- Module 5: Volume-Offset Logic -->
+<div class="bg-surface border border-border rounded-2xl p-8 hover:border-accent-2 transition-all reveal">
+<div class="flex items-start justify-between mb-4">
+<h3 class="font-display font-bold text-2xl text-accent-2">Volume-Offset Logic</h3>
+<span class="font-mono text-sm text-accent-2">Module 05 ★</span>
+</div>
+<p class="text-gray-400 mb-6">의복 외곽선에서 소재 두께 및 핏 스타일(loose/slim) 정보를 역산하여 실제 신체 치수를 추정하는 독자 역공학(Reverse Engineering) 로직. 미들웨어 핵심 구성요소.</p>
+
+<div class="space-y-4">
+<div>
+<div class="font-mono text-xs text-gray-500 mb-1">WHY</div>
+<div class="text-sm text-gray-300">사진 속 외곽선은 "의복을 입은 상태"이므로 의복 두께·여유분을 제거해야 신체 치수 복원 가능. 기존 2D 워핑은 이 과정을 단순 스케일링으로 처리하여 부정확.</div>
+</div>
+<div>
+<div class="font-mono text-xs text-gray-500 mb-1">INPUTS</div>
+<div class="text-sm text-gray-300"><code>garment_contour</code> (YOLO mask 외곽선), <code>material_thickness</code> (Material Inference 출력), <code>fit_style</code> (loose/regular/slim, 카테고리 기반 추론)</div>
+</div>
+<div>
+<div class="font-mono text-xs text-gray-500 mb-1">OUTPUTS</div>
+<div class="text-sm text-gray-300"><code>body_contour_estimated</code> (의복 제거 후 신체 외곽선 추정), <code>key_measurements_mm</code> (어깨폭/가슴둘레/허리 등)</div>
+</div>
+<div>
+<div class="font-mono text-xs text-gray-500 mb-1">CORE IDEA</div>
+<div class="text-sm text-gray-300">외곽선의 각 포인트에서 법선(Normal) 방향으로 <code>offset = thickness + ease_allowance(fit_style)</code>만큼 차감. 소재별 변형 계수는 Synthetic Data Factory 학습 데이터에서 확보. 측정 정확도는 PoC에서 검증 예정.</div>
+</div>
+<div class="bg-deep rounded-xl p-4 border border-border">
+<div class="font-mono text-xs text-gray-500 mb-2">Concept (simplified)</div>
+<pre class="font-mono text-xs text-accent overflow-x-auto">
+for point in garment_contour:
+normal = compute_normal(point)
+offset_mm = thickness_lookup[material_bucket] + ease_table[fit_style]
+body_point = point - normal * offset_mm / scale_factor
+body_contour = smooth(body_points)
+measurements = extract_key_dims(body_contour) # shoulder, chest, waist...
+</pre>
+</div>
+<div>
+<div class="font-mono text-xs text-gray-500 mb-1">INTERFACE</div>
+<div class="text-sm text-gray-300">복원된 신체 치수 → SMPL-X 파라미터 생성, Deformation Engine 입력 (체형 컨텍스트)</div>
+</div>
+</div>
+</div>
+
+<!-- Module 6: Deformation Engine -->
+<div class="bg-surface border border-border rounded-2xl p-8 hover:border-accent-2 transition-all reveal">
+<div class="flex items-start justify-between mb-4">
+<h3 class="font-display font-bold text-2xl text-accent-2">Deformation Engine</h3>
+<span class="font-mono text-sm text-accent-2">Module 06 ★</span>
+</div>
+<p class="text-gray-400 mb-6">소재별·체형별 물리 변형 데이터를 학습한 신경망 대리 모델(Neural Surrogate). 특정 소재가 특정 체형/포즈에서 어떻게 변형될지 사전 예측하여 CLO3D 물리 시뮬레이션의 warm-start 파라미터 제공. 시뮬 수렴 속도 및 안정성 향상 목표.</p>
+
+<div class="space-y-4">
+<div>
+<div class="font-mono text-xs text-gray-500 mb-1">WHY</div>
+<div class="text-sm text-gray-300">물리 시뮬레이션은 계산 비용이 높고 초기값에 민감. 학습 모델로 "좋은 출발점"을 제공하면 반복 횟수 감소 및 품질 안정화 가능. 비전-물리 간 번역 레이어 역할.</div>
+</div>
+<div>
+<div class="font-mono text-xs text-gray-500 mb-1">INPUTS</div>
+<div class="text-sm text-gray-300"><code>material_bucket</code>, <code>body_params</code> (SMPL-X 치수), <code>pose</code> (IK 출력), <code>garment_pattern</code> (패턴 메타데이터)</div>
+</div>
+<div>
+<div class="font-mono text-xs text-gray-500 mb-1">OUTPUTS</div>
+<div class="text-sm text-gray-300"><code>warm_start_params</code> (초기 드레이핑 힌트), <code>stability_hints</code> (충돌 회피 가이드, 측정 예정)</div>
+</div>
+<div>
+<div class="font-mono text-xs text-gray-500 mb-1">CORE IDEA</div>
+<div class="text-sm text-gray-300">Synthetic Data Factory에서 생성된 (소재, 체형, 포즈) → (변형 결과) 쌍으로 학습. MLP 또는 Graph Neural Network 기반 surrogate 모델. 추론 시 수 ms 내 warm-start 제공 목표 (정확도 PoC 검증 예정).</div>
+</div>
+<div class="bg-deep rounded-xl p-4 border border-border">
+<div class="font-mono text-xs text-gray-500 mb-2">Training concept</div>
+<pre class="font-mono text-xs text-accent overflow-x-auto">
+# Synthetic Data Factory loop
+for (material, body, pose) in training_set:
+sim_result = clo3d_simulate(material, body, pose) # ground truth
+features = encode(material, body, pose)
+model.train(features, target=sim_result.deformation_state)
+
+# Inference
+features = encode(material_inferred, body_measured, pose_ik)
+warm_start = model.predict(features)
+clo3d_simulate(material, body, pose, initial_state=warm_start) # faster convergence
+</pre>
+</div>
+<div>
+<div class="font-mono text-xs text-gray-500 mb-1">INTERFACE</div>
+<div class="text-sm text-gray-300">Warm-start 파라미터 → CLO3D API로 전달, 시뮬레이션 초기화 → 최종 드레이핑 결과 획득</div>
+</div>
+</div>
+</div>
+
+<!-- Module 7: Synthetic Data Factory -->
+<div class="bg-surface border border-border rounded-2xl p-8 hover:border-accent-2 transition-all reveal">
+<div class="flex items-start justify-between mb-4">
+<h3 class="font-display font-bold text-2xl text-accent-2">Synthetic Data Factory</h3>
+<span class="font-mono text-sm text-accent-2">Module 07 ★</span>
+</div>
+<p class="text-gray-400 mb-6">CLO3D 물리 시뮬레이션을 자동화하여 (소재, 체형, 포즈) → (변형 결과) 쌍의 학습 데이터를 대량 생성하는 합성 데이터 공정(Data Pipeline). 초기 데이터 부족 문제 해결 및 지속적 학습 플라이휠 구축의 핵심.</p>
+
+<div class="space-y-4">
+<div>
+<div class="font-mono text-xs text-gray-500 mb-1">WHY</div>
+<div class="text-sm text-gray-300">실제 데이터 수집은 비용·시간·라벨링 부담이 큼. 물리 엔진 기반 합성 데이터는 정확한 ground truth 제공 가능. 소재-핏 관계를 구조화된 형태로 학습하는 유일한 방법.</div>
+</div>
+<div>
+<div class="font-mono text-xs text-gray-500 mb-1">INPUTS</div>
+<div class="text-sm text-gray-300"><code>material_library</code> (CLO3D 소재 DB), <code>body_shape_distribution</code> (SMPL-X 파라미터 범위), <code>pose_library</code> (다양한 자세 샘플), <code>garment_patterns</code> (의복 패턴 템플릿)</div>
+</div>
+<div>
+<div class="font-mono text-xs text-gray-500 mb-1">OUTPUTS</div>
+<div class="text-sm text-gray-300"><code>synthetic_dataset</code> {렌더 이미지, 드레이핑 메쉬, 소재 라벨, 체형 파라미터, 변형 상태}</div>
+</div>
+<div>
+<div class="font-mono text-xs text-gray-500 mb-1">CORE IDEA</div>
+<div class="text-sm text-gray-300">CLO3D API/RPA를 통해 헤드리스(Headless) 배치 시뮬레이션 자동화. 파라미터 공간을 샘플링하여 다양한 조합 생성 → 시뮬 → 데이터 저장 → Deformation Engine 학습 → 배포 → PoC 피드백 → 재학습 루프.</div>
+</div>
+<div class="bg-deep rounded-xl p-4 border border-border">
+<div class="font-mono text-xs text-gray-500 mb-2">Pipeline (conceptual)</div>
+<pre class="font-mono text-xs text-accent overflow-x-auto">
+for iteration in range(N):
+material = sample(material_library)
+body = sample(body_distribution)
+pose = sample(pose_library)
+pattern = sample(garment_patterns)
+
+clo3d.load_pattern(pattern)
+clo3d.set_material(material)
+clo3d.set_avatar(body, pose)
+result = clo3d.simulate() # physics simulation
+
+dataset.append({
+'render': result.render_image,
+'mesh': result.draped_mesh,
+'material': material.properties,
+'body': body.params,
+'deformation': result.vertex_displacements
+})
+</pre>
+</div>
+<div>
+<div class="font-mono text-xs text-gray-500 mb-1">INTERFACE</div>
+<div class="text-sm text-gray-300">생성된 데이터셋 → Deformation Engine 학습, Material Inference 모델 학습. PoC 실사용 데이터로 지속 보정 (플라이휠)</div>
+</div>
+</div>
+</div>
+
+<!-- Module 8: SMPL-X & IK -->
+<div class="bg-surface border border-border rounded-2xl p-8 hover:border-success transition-all reveal">
+<div class="flex items-start justify-between mb-4">
+<h3 class="font-display font-bold text-2xl">SMPL-X & IK</h3>
+<span class="font-mono text-sm text-success">Module 08</span>
+</div>
+<p class="text-gray-400 mb-6">SMPL-X 파라메트릭 인체 모델로 3D 디지털 트윈 생성 후, Inverse Kinematics로 MediaPipe의 2D 관절 좌표를 3D 회전값으로 변환하여 아바타 포즈 동기화.</p>
+
+<div class="space-y-4">
+<div>
+<div class="font-mono text-xs text-gray-500 mb-1">WHY</div>
+<div class="text-sm text-gray-300">유저의 실제 포즈를 3D 공간에서 재현해야 정확한 가상피팅 가능. SMPL-X는 체형 파라미터와 포즈 파라미터를 분리하여 제어 가능.</div>
+</div>
+<div>
+<div class="font-mono text-xs text-gray-500 mb-1">INPUTS</div>
+<div class="text-sm text-gray-300"><code>body_measurements</code> (Volume-Offset 출력), <code>landmarks_2d</code> (MediaPipe 출력)</div>
+</div>
+<div>
+<div class="font-mono text-xs text-gray-500 mb-1">OUTPUTS</div>
+<div class="text-sm text-gray-300"><code>smplx_mesh</code> (3D body mesh), <code>joint_rotations</code> (각 관절의 3D 회전 파라미터)</div>
+</div>
+<div>
+<div class="font-mono text-xs text-gray-500 mb-1">CORE IDEA</div>
+<div class="text-sm text-gray-300">SMPL-X 모델은 shape parameters (β) + pose parameters (θ)로 메쉬 생성. IK는 2D 관절 좌표 → 3D 회전값 역산 문제를 최적화로 해결 (reprojection error 최소화).</div>
+</div>
+<div class="bg-deep rounded-xl p-4 border border-border">
+<div class="font-mono text-xs text-gray-500 mb-2">Concept</div>
+<pre class="font-mono text-xs text-accent overflow-x-auto">
+# SMPL-X forward
+beta = fit_shape_params(body_measurements)
+mesh = smplx_model(beta, theta=initial_pose)
+
+# IK optimization
+for iter in range(max_iter):
+joints_3d = mesh.get_joints()
+joints_2d_proj = project(joints_3d, camera_params)
+error = mse(joints_2d_proj, landmarks_2d)
+theta = theta - learning_rate * grad(error, theta)
+mesh = smplx_model(beta, theta)
+
+output: mesh, theta
+</pre>
+</div>
+<div>
+<div class="font-mono text-xs text-gray-500 mb-1">INTERFACE</div>
+<div class="text-sm text-gray-300">SMPL-X 메쉬 → CLO3D 아바타로 임포트, 포즈 동기화 → 드레이핑 시뮬레이션 실행</div>
+</div>
+</div>
+</div>
+
+<!-- Module 9: CLO3D API/RPA -->
+<div class="bg-surface border border-border rounded-2xl p-8 hover:border-success transition-all reveal">
+<div class="flex items-start justify-between mb-4">
+<h3 class="font-display font-bold text-2xl">CLO3D API / RPA</h3>
+<span class="font-mono text-sm text-success">Module 09</span>
+</div>
+<p class="text-gray-400 mb-6">CLO3D의 파이썬 API 및 스크립트 자동화를 통해 패턴 수정, 아바타 세팅, 물리 시뮬레이션을 헤드리스(Headless) 배치 모드로 실행. Synthetic Data Factory 및 실시간 피팅 파이프라인의 백본.</p>
+
+<div class="space-y-4">
+<div>
+<div class="font-mono text-xs text-gray-500 mb-1">WHY</div>
+<div class="text-sm text-gray-300">수동 CLO3D 작업은 확장 불가. API 자동화로 대량 시뮬레이션 및 배치 처리 가능. RPA로 UI 기반 워크플로우도 자동화 가능.</div>
+</div>
+<div>
+<div class="font-mono text-xs text-gray-500 mb-1">INPUTS</div>
+<div class="text-sm text-gray-300"><code>pattern_file</code> (.zprj), <code>material_properties</code>, <code>avatar_mesh</code> (SMPL-X), <code>simulation_params</code></div>
+</div>
+<div>
+<div class="font-mono text-xs text-gray-500 mb-1">OUTPUTS</div>
+<div class="text-sm text-gray-300"><code>draped_mesh</code> (.obj), <code>render_image</code> (.png), <code>simulation_log</code> (수렴 여부, 처리시간)</div>
+</div>
+<div>
+<div class="font-mono text-xs text-gray-500 mb-1">CORE IDEA</div>
+<div class="text-sm text-gray-300">CLO3D Python API를 통해 프로젝트 로드 → 패턴/소재/아바타 설정 → Simulate() 호출 → 결과 익스포트를 스크립트로 제어. RPA는 API 미지원 기능을 UI 자동화로 보완.</div>
+</div>
+<div class="bg-deep rounded-xl p-4 border border-border">
+<div class="font-mono text-xs text-gray-500 mb-2">Pseudo-code (API usage)</div>
+<pre class="font-mono text-xs text-accent overflow-x-auto">
+import CLO3D_API as clo
+
+clo.open_project('pattern.zprj')
+clo.set_avatar(smplx_mesh, pose_params)
+clo.set_material('fabric_cotton_medium')
+clo.apply_warm_start(warm_start_params) # from Deformation Engine
+
+result = clo.simulate(max_iter=100, tolerance=0.01)
+if result.converged:
+clo.export_mesh('output.obj')
+clo.render('output.png', camera_angle='front')
+log.append({'success': True, 'time': result.time_ms})
+</pre>
+</div>
+<div>
+<div class="font-mono text-xs text-gray-500 mb-1">INTERFACE</div>
+<div class="text-sm text-gray-300">시뮬 결과 메쉬 → GenAI 모듈 입력 (edge/depth 추출), 렌더 이미지 → 학습 데이터셋</div>
+</div>
+</div>
+</div>
+
+<!-- Module 10: Stable Diffusion (SD 1.5/SDXL) + ControlNet (Canny/Depth) -->
+<div class="bg-surface border border-border rounded-2xl p-8 hover:border-warning transition-all reveal">
+<div class="flex items-start justify-between mb-4">
+<h3 class="font-display font-bold text-2xl">Stable Diffusion (SD 1.5/SDXL) + ControlNet (Canny/Depth)</h3>
+<span class="font-mono text-sm text-warning">Module 10</span>
+</div>
+<p class="text-gray-400 mb-6">3D 시뮬레이션 결과 메쉬에서 추출한 Edge(Canny) 및 Depth 맵을 ControlNet 가이드로 삼아, Stable Diffusion XL로 포토리얼한 최종 이미지 합성. 핏 정보(fit consistency)를 유지하며 사실적 렌더링 제공.</p>
+
+<div class="space-y-4">
+<div>
+<div class="font-mono text-xs text-gray-500 mb-1">WHY</div>
+<div class="text-sm text-gray-300">3D 렌더는 기하학적으로 정확하지만 조명·질감이 부자연스러울 수 있음. GenAI로 사실감 향상하되, ControlNet으로 핏 정보는 보존.</div>
+</div>
+<div>
+<div class="font-mono text-xs text-gray-500 mb-1">INPUTS</div>
+<div class="text-sm text-gray-300"><code>draped_mesh</code> (CLO3D 출력), <code>canny_edge</code> (외곽선), <code>depth_map</code> (깊이), <code>prompt</code> (스타일 지시: "photorealistic studio lighting")</div>
+</div>
+<div>
+<div class="font-mono text-xs text-gray-500 mb-1">OUTPUTS</div>
+<div class="text-sm text-gray-300"><code>final_image</code> (포토리얼 가상피팅 결과, 품질 측정 예정)</div>
+</div>
+<div>
+<div class="font-mono text-xs text-gray-500 mb-1">CORE IDEA</div>
+<div class="text-sm text-gray-300">ControlNet은 edge/depth를 조건(condition)으로 삼아 Diffusion 생성 과정을 제약. 이를 통해 핏 형상은 유지하면서 텍스처·조명만 개선. SDXL은 고해상도 생성 지원.</div>
+</div>
+<div class="bg-deep rounded-xl p-4 border border-border">
+<div class="font-mono text-xs text-gray-500 mb-2">Concept (inference)</div>
+<pre class="font-mono text-xs text-accent overflow-x-auto">
+from diffusers import StableDiffusionXLControlNetPipeline, ControlNetModel
+
+# Extract guides from 3D
+canny_edge = extract_canny(render_from_mesh)
+depth_map = extract_depth(mesh)
+
+# Load models
+controlnet = ControlNetModel.from_pretrained("controlnet-canny-sdxl")
+pipe = StableDiffusionXLControlNetPipeline.from_pretrained("sdxl-base", controlnet=controlnet)
+
+# Generate
+image = pipe(
+prompt="photorealistic fashion photography, studio lighting",
+image=[canny_edge, depth_map],
+controlnet_conditioning_scale=[0.7, 0.5]
+).images[0]
+</pre>
+</div>
+<div>
+<div class="font-mono text-xs text-gray-500 mb-1">INTERFACE</div>
+<div class="text-sm text-gray-300">최종 이미지 → 유저에게 제시 (UX), PoC에서 핏 일관성 및 사용자 만족도 측정</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</section>
+<section id="story" class="relative py-24 border-t border-border">
+<div class="max-w-7xl mx-auto px-6">
+<div class="mb-16 reveal text-center">
+<div class="inline-flex items-center gap-2 px-4 py-2 bg-surface-2 rounded-full border border-border">
+<span class="w-2 h-2 bg-accent rounded-full"></span>
+<span class="text-sm font-mono text-gray-400">PIPELINE FLOW</span>
+</div>
+<h2 class="font-display font-bold text-4xl mt-6">How it works</h2>
+<p class="text-gray-400 mt-3 text-lg">사진 입력부터 최종 렌더링까지의 전체 파이프라인</p>
+</div>
+
+<!-- Step 1: PnP Calibration -->
+<div class="step-container mb-32">
+<div class="max-w-4xl mx-auto mb-12 step-text">
+<div class="inline-flex items-center gap-2 px-3 py-1.5 bg-accent/10 rounded-full border border-accent/30 mb-4">
+<span class="font-mono text-sm text-accent font-bold">STEP 01</span>
+</div>
+<h3 class="font-display font-bold text-4xl mb-4">PnP & Homography</h3>
+<p class="text-gray-400 text-xl leading-relaxed mb-8">
+일반 스마트폰 카메라로 촬영된 2D 이미지에서 실제 물리적 치수를 정밀하게 추출합니다. A4 용지를 기준 평면(Reference Plane)으로 활용하여 카메라의 내부/외부 파라미터를 자동 보정합니다.
+</p>
+<div class="grid md:grid-cols-3 gap-4 mb-6">
+<div class="p-4 rounded-xl bg-surface border border-border hover:border-accent/50 transition-all">
+<div class="text-accent font-semibold mb-2">Reference Plane</div>
+<div class="text-sm text-gray-400">A4용지, QR 마커 등 알려진 크기 객체 탐지</div>
+</div>
+<div class="p-4 rounded-xl bg-surface border border-border hover:border-accent/50 transition-all">
+<div class="text-accent font-semibold mb-2">Camera Pose</div>
+<div class="text-sm text-gray-400">cv2.solvePnP()로 카메라 위치 계산</div>
+</div>
+<div class="p-4 rounded-xl bg-surface border border-border hover:border-accent/50 transition-all">
+<div class="text-accent font-semibold mb-2">Scale Factor</div>
+<div class="text-sm text-gray-400">픽셀/mm 변환 비율 산출</div>
+</div>
+</div>
+<div class="p-4 rounded-xl bg-deep border border-accent/30">
+<div class="font-mono text-xs text-gray-500 mb-2">Output</div>
+<div class="font-mono text-sm text-accent">scale_factor: 3.2 px/mm • camera_pose: [R|t]</div>
+</div>
+</div>
+<div class="step-visual">
+<img src="step01-pnp-calibration.svg" alt="PnP Calibration Visual">
+</div>
+<div class="step-divider"></div>
+</div>
+
+<!-- Step 2: YOLO Segmentation -->
+<div class="step-container mb-32">
+<div class="max-w-4xl mx-auto mb-12 step-text">
+<div class="inline-flex items-center gap-2 px-3 py-1.5 bg-accent/10 rounded-full border border-accent/30 mb-4">
+<span class="font-mono text-sm text-accent font-bold">STEP 02</span>
+</div>
+<h3 class="font-display font-bold text-4xl mb-4">YOLO Segmentation</h3>
+<p class="text-gray-400 text-xl leading-relaxed mb-8">
+YOLOv8-seg 모델로 사람과 의류 영역을 정확히 분리합니다.
+인스턴스 세그멘테이션을 통해 바이너리 마스크와 의류 카테고리를 추출합니다.
+</p>
+<div class="grid md:grid-cols-3 gap-4 mb-6">
+<div class="p-4 rounded-xl bg-surface border border-border hover:border-accent/50 transition-all">
+<div class="text-accent font-semibold mb-2">Instance Segmentation</div>
+<div class="text-sm text-gray-400">사람과 의류를 픽셀 단위로 정확 분리</div>
+</div>
+<div class="p-4 rounded-xl bg-surface border border-border hover:border-accent/50 transition-all">
+<div class="text-accent font-semibold mb-2">Category Classification</div>
+<div class="text-sm text-gray-400">후디, 셔츠, 팬츠 등 의류 종류 분류</div>
+</div>
+<div class="p-4 rounded-xl bg-surface border border-border hover:border-accent/50 transition-all">
+<div class="text-accent font-semibold mb-2">Bounding Box & Mask</div>
+<div class="text-sm text-gray-400">정확한 영역 정보와 마스크 생성</div>
+</div>
+</div>
+<div class="p-4 rounded-xl bg-deep border border-accent/30">
+<div class="font-mono text-xs text-gray-500 mb-2">Output</div>
+<div class="font-mono text-sm text-accent">category: "HOODIE" • confidence: 0.94 • binary_mask: [H×W]</div>
+</div>
+</div>
+<div class="step-visual">
+<img src="step02-yolo-segmentation.svg" alt="YOLO Segmentation Visual">
+</div>
+<div class="step-divider"></div>
+</div>
+
+<!-- Step 3: Material Inference -->
+<div class="step-container mb-32">
+<div class="max-w-4xl mx-auto mb-12 step-text">
+<div class="inline-flex items-center gap-2 px-3 py-1.5 bg-accent/10 rounded-full border border-accent/30 mb-4">
+<span class="font-mono text-sm text-accent font-bold">STEP 03</span>
+</div>
+<h3 class="font-display font-bold text-4xl mb-4">Material Inference</h3>
+<p class="text-gray-400 text-xl leading-relaxed mb-8">
+ViT/Swin Transformer 기반 모델로 주름 패턴과 음영을 분석해 소재의 물리적 특성을 추정합니다.
+FFT 분석으로 주름 주파수를 계산하여 딱딱함/부드러움을 판단합니다.
+</p>
+<div class="grid md:grid-cols-3 gap-4 mb-6">
+<div class="p-4 rounded-xl bg-surface border border-border hover:border-accent/50 transition-all">
+<div class="text-accent font-semibold mb-2">Wrinkle Frequency</div>
+<div class="text-sm text-gray-400">FFT로 주름 패턴 분석 (고주파=뻣뻣함)</div>
+</div>
+<div class="p-4 rounded-xl bg-surface border border-border hover:border-accent/50 transition-all">
+<div class="text-accent font-semibold mb-2">Material Bucketing</div>
+<div class="text-sm text-gray-400">면/폴리/데님 등 소재군 분류</div>
+</div>
+<div class="p-4 rounded-xl bg-surface border border-border hover:border-accent/50 transition-all">
+<div class="text-accent font-semibold mb-2">Thickness Estimation</div>
+<div class="text-sm text-gray-400">음영 패턴으로 두께 레벨 추정</div>
+</div>
+</div>
+<div class="p-4 rounded-xl bg-deep border border-accent/30">
+<div class="font-mono text-xs text-gray-500 mb-2">Output</div>
+<div class="font-mono text-sm text-accent">material_bucket: "cotton_medium" • thickness: "medium" (2-3mm)</div>
+</div>
+</div>
+<div class="step-visual">
+<img src="step03-material-inference.svg" alt="Material Inference Visual">
+</div>
+<div class="step-divider"></div>
+</div>
+
+<!-- Step 4: Deformation Engine -->
+<div class="step-container mb-32">
+<div class="max-w-4xl mx-auto mb-12 step-text">
+<div class="inline-flex items-center gap-2 px-3 py-1.5 bg-accent/10 rounded-full border border-accent/30 mb-4">
+<span class="font-mono text-sm text-accent font-bold">STEP 04</span>
+</div>
+<h3 class="font-display font-bold text-4xl mb-4">Deformation Engine</h3>
+<p class="text-gray-400 text-xl leading-relaxed mb-8">
+Deformation Engine(Neural Surrogate)**는 Synthetic Data Factory에서 생성한 대규모 CLO3D 시뮬 데이터로 학습된 모델로, (소재·체형·포즈·패턴) 조건에서 발생할 드레이핑/변형 경향을 빠르게 예측해 물리 시뮬레이션의 시작 상태/가이드를 제공합니다. 이를 통해 시뮬 반복 횟수를 줄이고 수렴 안정성을 높입니다.
+</p>
+<div class="grid md:grid-cols-3 gap-4 mb-6">
+<div class="p-4 rounded-xl bg-surface border border-border hover:border-accent/50 transition-all">
+<div class="text-accent font-semibold mb-2">Neural Surrogate</div>
+<div class="text-sm text-gray-400">MLP/GNN으로 변형 패턴 학습</div>
+</div>
+<div class="p-4 rounded-xl bg-surface border border-border hover:border-accent/50 transition-all">
+<div class="text-accent font-semibold mb-2">Warm-start Generation</div>
+<div class="text-sm text-gray-400">물리 시뮬 초기값으로 수렴 가속</div>
+</div>
+<div class="p-4 rounded-xl bg-surface border border-border hover:border-accent/50 transition-all">
+<div class="text-accent font-semibold mb-2">Quality Stabilization</div>
+<div class="text-sm text-gray-400">일관된 드레이핑 품질 보장</div>
+</div>
+</div>
+<div class="p-4 rounded-xl bg-deep border border-accent/30">
+<div class="font-mono text-xs text-gray-500 mb-2">Output</div>
+<div class="font-mono text-sm text-accent">warm_start_params → CLO3D/Physics Engine</div>
+</div>
+</div>
+<div class="step-visual">
+<img src="step04-deformation-engine.svg" alt="Deformation Engine Visual">
+</div>
+<div class="step-divider"></div>
+</div>
+
+<!-- Step 5: Synthetic Data Factory -->
+<div class="step-container mb-32">
+<div class="max-w-4xl mx-auto mb-12 step-text">
+<div class="inline-flex items-center gap-2 px-3 py-1.5 bg-accent/10 rounded-full border border-accent/30 mb-4">
+<span class="font-mono text-sm text-accent font-bold">STEP 05</span>
+</div>
+<h3 class="font-display font-bold text-4xl mb-4">Synthetic Data Factory</h3>
+<p class="text-gray-400 text-xl leading-relaxed mb-8">
+CLO3D 기반 물리 시뮬레이션으로 합성 데이터를 자동 생성합니다.
+초기 데이터 부족 문제를 해결하고 지속적인 학습 루프를 구축합니다.
+</p>
+<div class="grid md:grid-cols-3 gap-4 mb-6">
+<div class="p-4 rounded-xl bg-surface border border-border hover:border-accent/50 transition-all">
+<div class="text-accent font-semibold mb-2">CLO3D Automation</div>
+<div class="text-sm text-gray-400">물리 시뮬레이션으로 ground truth 생성</div>
+</div>
+<div class="p-4 rounded-xl bg-surface border border-border hover:border-accent/50 transition-all">
+<div class="text-accent font-semibold mb-2">Continuous Learning</div>
+<div class="text-sm text-gray-400">생성→학습→배포→피드백 순환</div>
+</div>
+<div class="p-4 rounded-xl bg-surface border border-border hover:border-accent/50 transition-all">
+<div class="text-accent font-semibold mb-2">Competitive Moat</div>
+<div class="text-sm text-gray-400">복제 난이도 높은 플라이휠</div>
+</div>
+</div>
+<div class="p-4 rounded-xl bg-deep border border-accent/30">
+<div class="font-mono text-xs text-gray-500 mb-2">Output</div>
+<div class="font-mono text-sm text-accent">deformation_dataset_v1.0 → Train Deformation Engine</div>
+</div>
+</div>
+<div class="step-visual">
+<img src="step05-synthetic-data-factory.svg" alt="Synthetic Data Factory Visual">
+</div>
+<div class="step-divider"></div>
+</div>
+
+<!-- Step 6: GenAI Synthesis -->
+<div class="step-container mb-16">
+<div class="max-w-4xl mx-auto mb-12 step-text">
+<div class="inline-flex items-center gap-2 px-3 py-1.5 bg-accent/10 rounded-full border border-accent/30 mb-4">
+<span class="font-mono text-sm text-accent font-bold">STEP 06</span>
+</div>
+<h3 class="font-display font-bold text-4xl mb-4">GenAI Synthesis</h3>
+<p class="text-gray-400 text-xl leading-relaxed mb-8">
+SDXL + ControlNet으로 3D 메쉬를 포토리얼한 이미지로 변환합니다.
+Edge/Depth 가이드로 핏 정보를 유지하면서 고품질 결과물을 생성합니다.
+</p>
+<div class="grid md:grid-cols-3 gap-4 mb-6">
+<div class="p-4 rounded-xl bg-surface border border-border hover:border-accent/50 transition-all">
+<div class="text-accent font-semibold mb-2">ControlNet Conditioning</div>
+<div class="text-sm text-gray-400">Edge/Depth 맵으로 형상 보존</div>
+</div>
+<div class="p-4 rounded-xl bg-surface border border-border hover:border-accent/50 transition-all">
+<div class="text-accent font-semibold mb-2">Photorealistic Rendering</div>
+<div class="text-sm text-gray-400">SDXL 기반 고품질 이미지 생성</div>
+</div>
+<div class="p-4 rounded-xl bg-surface border border-border hover:border-accent/50 transition-all">
+<div class="text-accent font-semibold mb-2">Fit-Consistent Output</div>
+<div class="text-sm text-gray-400">핏 정보 유지하며 자연스러운 합성</div>
+</div>
+</div>
+<div class="p-4 rounded-xl bg-deep border border-accent/30">
+<div class="font-mono text-xs text-gray-500 mb-2">Output</div>
+<div class="font-mono text-sm text-accent">final_render.jpg • Photorealistic virtual try-on</div>
+</div>
+</div>
+<div class="step-visual">
+<img src="step06-genai-synthesis.svg" alt="GenAI Synthesis Visual">
+</div>
+</div>
+</div>
+
+<style>
+/* Step container animations */
+.step-container {
+opacity: 0;
+animation: fadeInUp 0.8s ease-out forwards;
+padding-top: 2rem;
+padding-bottom: 2rem;
+}
+
+.step-container:nth-child(2) { animation-delay: 0.1s; }
+.step-container:nth-child(3) { animation-delay: 0.2s; }
+.step-container:nth-child(4) { animation-delay: 0.3s; }
+.step-container:nth-child(5) { animation-delay: 0.4s; }
+.step-container:nth-child(6) { animation-delay: 0.5s; }
+.step-container:nth-child(7) { animation-delay: 0.6s; }
+
+@keyframes fadeInUp {
+from {
+opacity: 0;
+transform: translateY(40px);
+}
+to {
+opacity: 1;
+transform: translateY(0);
+}
+}
+
+/* Text content animations */
+.step-text {
+animation: slideInLeft 0.6s ease-out;
+}
+
+@keyframes slideInLeft {
+from {
+opacity: 0;
+transform: translateX(-30px);
+}
+to {
+opacity: 1;
+transform: translateX(0);
+}
+}
+
+/* Visual container - full width */
+.step-visual {
+width: 100vw;
+position: relative;
+left: 50%;
+right: 50%;
+margin-left: -50vw;
+margin-right: -50vw;
+margin-top: 3rem;
+margin-bottom: 3rem;
+overflow: hidden;
+animation: slideInRight 0.8s ease-out;
+}
+
+.step-visual img {
+width: 100%;
+height: auto;
+display: block;
+transition: transform 0.3s ease;
+min-height: 400px;
+}
+
+.step-visual:hover img {
+transform: scale(1.02);
+}
+
+@keyframes slideInRight {
+from {
+opacity: 0;
+transform: translateX(50px);
+}
+to {
+opacity: 1;
+transform: translateX(0);
+}
+}
+
+/* Step divider - animated line */
+.step-divider {
+width: 2px;
+height: 120px;
+background: linear-gradient(to bottom, #00d4ff, transparent);
+margin: 80px auto;
+position: relative;
+animation: growLine 1s ease-out;
+}
+
+.step-divider::before {
+content: '';
+position: absolute;
+top: 0;
+left: 50%;
+transform: translateX(-50%);
+width: 8px;
+height: 8px;
+background: #00d4ff;
+border-radius: 50%;
+box-shadow: 0 0 20px #00d4ff;
+animation: pulse 2s infinite;
+}
+
+@keyframes growLine {
+from {
+height: 0;
+opacity: 0;
+}
+to {
+height: 120px;
+opacity: 1;
+}
+}
+
+@keyframes pulse {
+0%, 100% {
+opacity: 1;
+transform: translateX(-50%) scale(1);
+}
+50% {
+opacity: 0.5;
+transform: translateX(-50%) scale(1.3);
+}
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+.step-container h3 {
+font-size: 2rem;
+}
+
+.step-container p {
+font-size: 1rem;
+}
+}
+</style>
+</section>
+
+<section id="flywheel" class="relative py-24 border-t border-border">
+<div class="max-w-7xl mx-auto px-6">
+<div class="mb-16 reveal">
+<div class="inline-flex items-center gap-2 px-4 py-2 bg-surface-2 rounded-full border border-border">
+<span class="w-2 h-2 bg-success rounded-full"></span>
+<span class="text-sm font-mono text-gray-400">COMPETITIVE MOAT</span>
+</div>
+<h2 class="font-display font-bold text-4xl mt-6">Data Flywheel & Moat</h2>
+<p class="text-gray-400 mt-3 text-lg">합성 데이터 공장(Synthetic Data Factory)을 중심으로 한 지속 학습 루프</p>
+</div>
+
+<div class="grid lg:grid-cols-2 gap-12 items-center reveal">
+<div>
+<svg viewBox="0 0 600 600" class="w-full h-auto">
+<defs>
+<linearGradient id="cycleGrad" x1="0" y1="0" x2="1" y2="1">
+<stop offset="0" stop-color="#00d4ff" stop-opacity="0.3"/>
+<stop offset="1" stop-color="#7c3aed" stop-opacity="0.3"/>
+</linearGradient>
+<marker id="arrowCycle" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+<polygon points="0,0 12,6 0,12" fill="#10b981"/>
+</marker>
+</defs>
+
+<circle cx="300" cy="300" r="100" fill="url(#cycleGrad)" stroke="#7c3aed" stroke-width="3"/>
+<text x="300" y="290" text-anchor="middle" font-family="Outfit" font-weight="700" font-size="20" fill="#e5e7eb">Synthetic</text>
+<text x="300" y="315" text-anchor="middle" font-family="Outfit" font-weight="700" font-size="20" fill="#e5e7eb">Data Factory</text>
+
+<g transform="translate(300, 100)">
+<circle cx="0" cy="0" r="70" fill="#12121a" stroke="#00d4ff" stroke-width="3"/>
+<text x="0" y="-10" text-anchor="middle" font-family="JetBrains Mono" font-size="16" fill="#00d4ff">CLO3D</text>
+<text x="0" y="10" text-anchor="middle" font-family="JetBrains Mono" font-size="14" fill="#9ca3af">Simulation</text>
+</g>
+
+<g transform="translate(476, 300)">
+<circle cx="0" cy="0" r="70" fill="#12121a" stroke="#10b981" stroke-width="3"/>
+<text x="0" y="-10" text-anchor="middle" font-family="JetBrains Mono" font-size="16" fill="#10b981">Dataset</text>
+<text x="0" y="10" text-anchor="middle" font-family="JetBrains Mono" font-size="14" fill="#9ca3af">Generation</text>
+</g>
+
+<g transform="translate(300, 500)">
+<circle cx="0" cy="0" r="70" fill="#12121a" stroke="#f59e0b" stroke-width="3"/>
+<text x="0" y="-10" text-anchor="middle" font-family="JetBrains Mono" font-size="16" fill="#f59e0b">Training</text>
+<text x="0" y="10" text-anchor="middle" font-family="JetBrains Mono" font-size="14" fill="#9ca3af">Models</text>
+</g>
+
+<g transform="translate(124, 300)">
+<circle cx="0" cy="0" r="70" fill="#12121a" stroke="#7c3aed" stroke-width="3"/>
+<text x="0" y="-10" text-anchor="middle" font-family="JetBrains Mono" font-size="16" fill="#7c3aed">Deploy</text>
+<text x="0" y="10" text-anchor="middle" font-family="JetBrains Mono" font-size="14" fill="#9ca3af">& PoC</text>
+</g>
+
+<path d="M 300,170 L 300,200" stroke="#10b981" stroke-width="4" marker-end="url(#arrowCycle)"/>
+<path d="M 406,300 L 376,300" stroke="#10b981" stroke-width="4" marker-end="url(#arrowCycle)"/>
+<path d="M 300,430 L 300,400" stroke="#10b981" stroke-width="4" marker-end="url(#arrowCycle)"/>
+<path d="M 194,300 L 224,300" stroke="#10b981" stroke-width="4" marker-end="url(#arrowCycle)"/>
+
+<circle cx="300" cy="300" r="240" fill="none" stroke="#10b981" stroke-width="2" stroke-dasharray="12 8" opacity="0.4"/>
+<text x="300" y="60" text-anchor="middle" font-family="JetBrains Mono" font-size="13" fill="#10b981">Continuous Learning Loop</text>
+</svg>
+</div>
+
+<div class="space-y-6">
+<div class="bg-surface border border-border rounded-xl p-6">
+<div class="flex items-center gap-3 mb-3">
+<div class="w-10 h-10 rounded-lg bg-accent/10 flex items-center justify-center">
+<span class="text-accent font-bold">1</span>
+</div>
+<h4 class="font-display font-bold text-lg">초기 데이터 부족 해결</h4>
+</div>
+<p class="text-gray-400 text-sm">CLO3D 기반 합성 데이터로 초기 학습 파이프라인 구축. 실제 데이터 수집 전에도 개발 가능.</p>
+</div>
+
+<div class="bg-surface border border-border rounded-xl p-6">
+<div class="flex items-center gap-3 mb-3">
+<div class="w-10 h-10 rounded-lg bg-success/10 flex items-center justify-center">
+<span class="text-success font-bold">2</span>
+</div>
+<h4 class="font-display font-bold text-lg">구조화된 학습 데이터</h4>
+</div>
+<p class="text-gray-400 text-sm">(소재, 체형, 포즈) → (변형 결과) 쌍을 정확히 라벨링. 물리 시뮬 기반이므로 ground truth 신뢰도 높음.</p>
+</div>
+
+<div class="bg-surface border border-border rounded-xl p-6">
+<div class="flex items-center gap-3 mb-3">
+<div class="w-10 h-10 rounded-lg bg-accent-2/10 flex items-center justify-center">
+<span class="text-accent-2 font-bold">3</span>
+</div>
+<h4 class="font-display font-bold text-lg">지속 개선 플라이휠</h4>
+</div>
+<p class="text-gray-400 text-sm">PoC 실사용 데이터 → 합성 데이터 보정 → 재학습 → 성능 향상 → 더 많은 사용자 → 더 많은 데이터. 선순환 구조.</p>
+</div>
+
+<div class="bg-surface border border-border rounded-xl p-6">
+<div class="flex items-center gap-3 mb-3">
+<div class="w-10 h-10 rounded-lg bg-warning/10 flex items-center justify-center">
+<span class="text-warning font-bold">4</span>
+</div>
+<h4 class="font-display font-bold text-lg">기술 장벽 (Moat)</h4>
+</div>
+<p class="text-gray-400 text-sm">물리 시뮬 기반 합성 데이터 생성 공정은 복제 난이도 높음. CLO3D API 숙련도 및 파이프라인 설계 노하우 필요.</p>
+</div>
+</div>
+</div>
+</div>
+</section>
+
+<section id="validation" class="relative py-24 border-t border-border">
+<div class="max-w-7xl mx-auto px-6">
+<div class="mb-16 reveal">
+<div class="inline-flex items-center gap-2 px-4 py-2 bg-surface-2 rounded-full border border-border">
+<span class="w-2 h-2 bg-warning rounded-full"></span>
+<span class="text-sm font-mono text-gray-400">POC VALIDATION</span>
+</div>
+<h2 class="font-display font-bold text-4xl mt-6">Validation Plan</h2>
+<p class="text-gray-400 mt-3 text-lg">측정 예정 톤 / PoC 지표 / 검증 방식 / 데이터 전략</p>
+</div>
+
+<div class="grid lg:grid-cols-3 gap-6">
+<div class="lg:col-span-2 space-y-6 reveal">
+<div class="bg-surface border border-border rounded-xl p-8">
+<h3 class="font-display font-bold text-xl mb-4 text-accent">PoC 검증 지표 (측정 예정)</h3>
+<div class="space-y-4">
+<div class="flex items-start gap-4">
+<div class="w-8 h-8 rounded-lg bg-accent/10 flex items-center justify-center flex-shrink-0 mt-1">
+<svg class="w-5 h-5 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+</svg>
+</div>
+<div>
+<div class="font-semibold text-gray-200 mb-1">반품률 감소 (사이즈/핏 불만족 사유 중심)</div>
+<div class="text-sm text-gray-400">협력 쇼핑몰에서 가상피팅 사용군 vs 미사용군 A/B 테스트. 반품 사유 설문 기반으로 "사이즈 안 맞음" / "핏 기대와 다름" 항목 비율 측정 예정. Target: 유의미한 감소 확인.</div>
+</div>
+</div>
+<div class="flex items-start gap-4">
+<div class="w-8 h-8 rounded-lg bg-accent/10 flex items-center justify-center flex-shrink-0 mt-1">
+<svg class="w-5 h-5 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"/>
+</svg>
+</div>
+<div>
+<div class="font-semibold text-gray-200 mb-1">가상피팅 전환율 (Feature Adoption)</div>
+<div class="text-sm text-gray-400">상품 페이지 방문자 중 가상피팅 기능을 실제 사용한 비율. 사용 후 구매 전환율 변화도 추적 예정. Target: 전환율 개선 여부 확인.</div>
+</div>
+</div>
+<div class="flex items-start gap-4">
+<div class="w-8 h-8 rounded-lg bg-accent/10 flex items-center justify-center flex-shrink-0 mt-1">
+<svg class="w-5 h-5 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+</svg>
+</div>
+<div>
+<div class="font-semibold text-gray-200 mb-1">처리시간 (End-to-End Latency)</div>
+<div class="text-sm text-gray-400">사진 업로드 → 최종 렌더 산출까지 소요 시간 측정 예정. 배치 처리 기준. Target: 상용 서비스 가능 수준 검증 (정확도는 PoC에서 확인).</div>
+</div>
+</div>
+</div>
+</div>
+
+<div class="bg-surface border border-border rounded-xl p-8">
+<h3 class="font-display font-bold text-xl mb-4 text-success">검증 방식 (Methodology)</h3>
+<div class="space-y-3 text-gray-400">
+<p><strong class="text-gray-200">협력 쇼핑몰/브랜드 파트너십:</strong> PoC 단계에서 실제 고객 대상 A/B 테스트 환경 확보. 통제군(기존 방식) vs 실험군(Body-Fit AI 가상피팅) 비교.</p>
+<p><strong class="text-gray-200">반품 사유 설문 기반 측정:</strong> 반품 발생 시 설문을 통해 구체적 사유 수집. "사이즈 불일치" / "핏 기대치 불일치" 항목을 정량화하여 개선 여부 판단.</p>
+<p><strong class="text-gray-200">사용자 만족도 조사:</strong> 가상피팅 사용 후 설문(NPS, 만족도 리커트 척도)으로 주관적 품질 평가 병행.</p>
+<p><strong class="text-gray-200">기술 지표 모니터링:</strong> 처리시간, 시뮬레이션 수렴률, 모델 추론 정확도(소재 분류 등) 로그 수집 및 분석.</p>
+</div>
+</div>
+</div>
+
+<div class="space-y-6 reveal">
+<div class="bg-gradient-to-br from-accent/10 to-accent-2/10 border border-accent/30 rounded-xl p-8">
+<h3 class="font-display font-bold text-xl mb-4 text-accent">데이터 전략 (Staged Approach)</h3>
+<div class="space-y-4">
+<div>
+<div class="font-semibold text-gray-200 mb-2 flex items-center gap-2">
+<span class="w-6 h-6 rounded-full bg-accent text-deep text-xs font-bold flex items-center justify-center">1</span>
+Phase 1: Synthetic-Only
+</div>
+<div class="text-sm text-gray-400">CLO3D 기반 합성 데이터로 초기 파이프라인 구축. Deformation Engine, Material Inference 모델 1차 학습 완료.</div>
+</div>
+<div>
+<div class="font-semibold text-gray-200 mb-2 flex items-center gap-2">
+<span class="w-6 h-6 rounded-full bg-success text-deep text-xs font-bold flex items-center justify-center">2</span>
+Phase 2: PoC Real Data
+</div>
+<div class="text-sm text-gray-400">협력사 PoC에서 실사용 데이터 수집. 합성 데이터와 실제 데이터 간 도메인 갭 확인 및 보정 파라미터 조정.</div>
+</div>
+<div>
+<div class="font-semibold text-gray-200 mb-2 flex items-center gap-2">
+<span class="w-6 h-6 rounded-full bg-accent-2 text-deep text-xs font-bold flex items-center justify-center">3</span>
+Phase 3: Hybrid Training
+</div>
+<div class="text-sm text-gray-400">합성 데이터(대량) + 실제 데이터(소량, 고품질)를 혼합 학습. 지속적 재학습 루프 구축 (Data Flywheel 가동).</div>
+</div>
+</div>
+</div>
+
+<div class="bg-surface border border-border rounded-xl p-6">
+<h4 class="font-display font-bold mb-3">핵심 원칙</h4>
+<ul class="space-y-2 text-sm text-gray-400">
+<li class="flex items-start gap-2">
+<svg class="w-4 h-4 text-warning mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+<path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"/>
+</svg>
+<span>확정 수치 주장 금지 (측정 예정/Target 표현 사용)</span>
+</li>
+<li class="flex items-start gap-2">
+<svg class="w-4 h-4 text-warning mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+<path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"/>
+</svg>
+<span>A/B 테스트 기반 객관적 측정</span>
+</li>
+<li class="flex items-start gap-2">
+<svg class="w-4 h-4 text-warning mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+<path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"/>
+</svg>
+<span>합성 데이터로 시작, 실제 데이터로 보정</span>
+</li>
+<li class="flex items-start gap-2">
+<svg class="w-4 h-4 text-warning mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+<path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"/>
+</svg>
+<span>플라이휠 구조로 지속 개선</span>
+</li>
+</ul>
+</div>
+</div>
+</div>
+</div>
+</section>
+
+<section id="roadmap" class="relative py-24 border-t border-border">
+<div class="max-w-7xl mx-auto px-6">
+<div class="mb-16 reveal">
+<div class="inline-flex items-center gap-2 px-4 py-2 bg-surface-2 rounded-full border border-border">
+<span class="w-2 h-2 bg-accent-2 rounded-full"></span>
+<span class="text-sm font-mono text-gray-400">DEVELOPMENT ROADMAP</span>
+</div>
+<h2 class="font-display font-bold text-4xl mt-6">Roadmap</h2>
+<p class="text-gray-400 mt-3 text-lg">MVP → PoC → Pilot → Scale 단계별 산출물 / 검증 항목 / 리스크 대응</p>
+</div>
+
+<div class="relative reveal">
+<div class="absolute left-8 top-0 bottom-0 w-0.5 bg-gradient-to-b from-accent via-success to-accent-2"></div>
+
+<div class="space-y-12">
+<div class="relative pl-20">
+<div class="absolute left-0 top-0 w-16 h-16 rounded-2xl bg-accent/10 border-2 border-accent flex items-center justify-center">
+<span class="font-bold text-accent text-xl">1</span>
+</div>
+<div class="bg-surface border border-border rounded-xl p-8">
+<div class="flex items-center justify-between mb-4">
+<h3 class="font-display font-bold text-2xl text-accent">Phase 1: MVP (Minimum Viable Product)</h3>
+<span class="font-mono text-sm text-gray-500">Q1 2026</span>
+</div>
+<div class="grid md:grid-cols-2 gap-6">
+<div>
+<h4 class="font-semibold text-gray-200 mb-3">산출물 (Deliverables)</h4>
+<ul class="space-y-2 text-sm text-gray-400">
+<li>• 전체 4-layer 파이프라인 프로토타입 구현</li>
+<li>• PnP, MediaPipe, YOLO, Material Inference 통합</li>
+<li>• CLO3D API 기반 Synthetic Data Factory 1차 구축</li>
+<li>• Deformation Engine 초기 학습 모델</li>
+<li>• SMPL-X + IK 아바타 생성 검증</li>
+<li>• SDXL + ControlNet 렌더링 테스트</li>
+</ul>
+</div>
+<div>
+<h4 class="font-semibold text-gray-200 mb-3">검증 항목 (Validation)</h4>
+<ul class="space-y-2 text-sm text-gray-400">
+<li>• 전체 파이프라인 End-to-End 작동 여부</li>
+<li>• 각 모듈 간 데이터 인터페이스 검증</li>
+<li>• 합성 데이터 생성 속도 및 품질 확인</li>
+<li>• 내부 테스트 데이터셋 기준 정성 평가</li>
+</ul>
+<h4 class="font-semibold text-gray-200 mt-6 mb-3">리스크 & 대응</h4>
+<ul class="space-y-2 text-sm text-gray-400">
+<li>• 모듈 통합 복잡도 → 인터페이스 명세 선행 작성</li>
+<li>• CLO3D API 학습 곡선 → 전담 엔지니어 배치</li>
+</ul>
+</div>
+</div>
+</div>
+</div>
+
+<div class="relative pl-20">
+<div class="absolute left-0 top-0 w-16 h-16 rounded-2xl bg-success/10 border-2 border-success flex items-center justify-center">
+<span class="font-bold text-success text-xl">2</span>
+</div>
+<div class="bg-surface border border-border rounded-xl p-8">
+<div class="flex items-center justify-between mb-4">
+<h3 class="font-display font-bold text-2xl text-success">Phase 2: PoC (Proof of Concept)</h3>
+<span class="font-mono text-sm text-gray-500">Q2 2026</span>
+</div>
+<div class="grid md:grid-cols-2 gap-6">
+<div>
+<h4 class="font-semibold text-gray-200 mb-3">산출물</h4>
+<ul class="space-y-2 text-sm text-gray-400">
+<li>• 협력 쇼핑몰 파트너 확보 (1-2곳)</li>
+<li>• A/B 테스트 환경 구축 (통제군 vs 실험군)</li>
+<li>• 실사용 데이터 수집 파이프라인 구축</li>
+<li>• 반품 사유 설문 시스템 연동</li>
+<li>• 사용자 만족도 조사 프로세스 수립</li>
+<li>• 기술 지표 모니터링 대시보드 구축</li>
+</ul>
+</div>
+<div>
+<h4 class="font-semibold text-gray-200 mb-3">검증 항목</h4>
+<ul class="space-y-2 text-sm text-gray-400">
+<li>• 반품률 감소 여부 (사이즈/핏 불만족 사유)</li>
+<li>• 가상피팅 전환율 측정</li>
+<li>• 처리시간 측정 (상용화 가능 수준 여부)</li>
+<li>• 합성 데이터 vs 실제 데이터 도메인 갭 분석</li>
+<li>• 사용자 주관적 만족도 (NPS, 리커트 척도)</li>
+</ul>
+<h4 class="font-semibold text-gray-200 mt-6 mb-3">리스크 & 대응</h4>
+<ul class="space-y-2 text-sm text-gray-400">
+<li>• 파트너사 확보 난항 → 다각도 네트워킹</li>
+<li>• 실사용 데이터 수집량 부족 → 합성 데이터 비중 유지</li>
+<li>• 도메인 갭 문제 → 도메인 적응(Domain Adaptation) 기법 적용</li>
+</ul>
+</div>
+</div>
+</div>
+</div>
+
+<div class="relative pl-20">
+<div class="absolute left-0 top-0 w-16 h-16 rounded-2xl bg-accent-2/10 border-2 border-accent-2 flex items-center justify-center">
+<span class="font-bold text-accent-2 text-xl">3</span>
+</div>
+<div class="bg-surface border border-border rounded-xl p-8">
+<div class="flex items-center justify-between mb-4">
+<h3 class="font-display font-bold text-2xl text-accent-2">Phase 3: Pilot (Limited Deployment)</h3>
+<span class="font-mono text-sm text-gray-500">Q3-Q4 2026</span>
+</div>
+<div class="grid md:grid-cols-2 gap-6">
+<div>
+<h4 class="font-semibold text-gray-200 mb-3">산출물</h4>
+<ul class="space-y-2 text-sm text-gray-400">
+<li>• 협력 쇼핑몰 3-5곳으로 확대</li>
+<li>• 실시간 서비스 인프라 구축 (배치 → 준실시간)</li>
+<li>• 합성 + 실제 데이터 혼합 학습 파이프라인</li>
+<li>• Deformation Engine 2.0 (PoC 피드백 반영)</li>
+<li>• 사용자 경험(UX) 개선 (응답속도, UI)</li>
+<li>• 비즈니스 모델 검증 (과금 구조, 단가 등)</li>
+</ul>
+</div>
+<div>
+<h4 class="font-semibold text-gray-200 mb-3">검증 항목</h4>
+<ul class="space-y-2 text-sm text-gray-400">
+<li>• 확장성(Scalability) 테스트 (동시 사용자 부하)</li>
+<li>• 누적 사용자 피드백 정량 분석</li>
+<li>• 비즈니스 지표 (매출 기여도, ROI)</li>
+<li>• 경쟁사 대비 우위 평가 (정확도, 속도)</li>
+<li>• 데이터 플라이휠 가동 여부 (재학습 주기 확립)</li>
+</ul>
+<h4 class="font-semibold text-gray-200 mt-6 mb-3">리스크 & 대응</h4>
+<ul class="space-y-2 text-sm text-gray-400">
+<li>• 인프라 비용 증가 → 클라우드 비용 최적화</li>
+<li>• 사용자 이탈 → UX 개선, 응답속도 향상</li>
+<li>• 경쟁사 등장 → 기술 장벽(Moat) 강화</li>
+</ul>
+</div>
+</div>
+</div>
+</div>
+
+<div class="relative pl-20">
+<div class="absolute left-0 top-0 w-16 h-16 rounded-2xl bg-warning/10 border-2 border-warning flex items-center justify-center">
+<span class="font-bold text-warning text-xl">4</span>
+</div>
+<div class="bg-surface border border-border rounded-xl p-8">
+<div class="flex items-center justify-between mb-4">
+<h3 class="font-display font-bold text-2xl text-warning">Phase 4: Scale (Full Commercialization)</h3>
+<span class="font-mono text-sm text-gray-500">2027+</span>
+</div>
+<div class="grid md:grid-cols-2 gap-6">
+<div>
+<h4 class="font-semibold text-gray-200 mb-3">산출물</h4>
+<ul class="space-y-2 text-sm text-gray-400">
+<li>• 다수 쇼핑몰/브랜드 대상 SaaS 플랫폼 출시</li>
+<li>• API 제품화 (B2B 미들웨어 판매)</li>
+<li>• 자동화된 Data Flywheel 전면 가동</li>
+<li>• 글로벌 시장 진출 (해외 체형 데이터 추가)</li>
+<li>• 추가 소재군 확장 (아웃도어, 언더웨어 등)</li>
+<li>• 실시간 AR 가상피팅 통합 (모바일)</li>
+</ul>
+</div>
+<div>
+<h4 class="font-semibold text-gray-200 mb-3">검증 항목</h4>
+<ul class="space-y-2 text-sm text-gray-400">
+<li>• 대규모 트래픽 안정성 (99.9% uptime)</li>
+<li>• 산업 표준 정확도 달성</li>
+<li>• 비즈니스 성과 (ARR, 고객사 수)</li>
+<li>• 브랜드 인지도 (시장 점유율)</li>
+<li>• 지속적 기술 우위 유지 (특허, 노하우)</li>
+</ul>
+<h4 class="font-semibold text-gray-200 mt-6 mb-3">리스크 & 대응</h4>
+<ul class="space-y-2 text-sm text-gray-400">
+<li>• 시장 포화 → 신규 유스케이스 발굴</li>
+<li>• 규제 변화 → 법무 자문, 컴플라이언스 강화</li>
+<li>• 기술 혁신 정체 → R&D 투자 지속</li>
+</ul>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</section>
+<section class="py-32 bg-gradient-to-b from-deep to-surface/50">
+<div class="max-w-7xl mx-auto px-6 text-center">
+<div class="inline-flex items-center gap-2 px-4 py-2 bg-success/10 rounded-full mb-8">
+<span class="w-2 h-2 bg-success rounded-full"></span>
+<span class="text-sm font-mono text-success">TECHNOLOGY READY</span>
+</div>
+
+<h2 class="font-display font-bold text-4xl md:text-5xl mb-8">
+<span class="text-white">6단계 파이프라인</span><br>
+<span class="bg-gradient-to-r from-accent to-accent-2 bg-clip-text text-transparent">완전 자동화 구현 예정</span>
+</h2>
+
+<!-- Summary Stats -->
+<div class="grid grid-cols-2 md:grid-cols-4 gap-6 max-w-4xl mx-auto mt-16">
+<div class="metric-card p-6 rounded-2xl">
+<div class="text-4xl font-display font-bold text-white mb-2">±2mm</div>
+<div class="text-sm text-gray-500">측정 정확도</div>
+</div>
+<div class="metric-card p-6 rounded-2xl">
+<div class="text-4xl font-display font-bold text-white mb-2">&lt;30s</div>
+<div class="text-sm text-gray-500">전체 처리 시간</div>
+</div>
+<div class="metric-card p-6 rounded-2xl">
+<div class="text-4xl font-display font-bold text-white mb-2">0</div>
+<div class="text-sm text-gray-500">수동 개입 단계</div>
+</div>
+<div class="metric-card p-6 rounded-2xl">
+<div class="text-4xl font-display font-bold text-white mb-2">8K</div>
+<div class="text-sm text-gray-500">출력 해상도</div>
+</div>
+</div>
+</section>
+<section id="faq" class="relative py-24 border-t border-border">
+<div class="max-w-4xl mx-auto px-6">
+<div class="mb-16 reveal">
+<div class="inline-flex items-center gap-2 px-4 py-2 bg-surface-2 rounded-full border border-border">
+<span class="w-2 h-2 bg-accent rounded-full"></span>
+<span class="text-sm font-mono text-gray-400">FAQ</span>
+</div>
+<h2 class="font-display font-bold text-4xl mt-6">TECHNICAL QUESTIONS</h2>
+<p class="text-gray-400 mt-3 text-lg">기술적 타당성 및 차별성 관련 핵심 질문</p>
+</div>
+<div class="space-y-4 reveal">
+<details class="bg-surface border border-border rounded-xl overflow-hidden group">
+<summary class="px-8 py-6 cursor-pointer font-display font-semibold text-lg hover:bg-surface-2 transition-colors flex items-center justify-between">
+Q1. 왜 기존 2D 워핑(warping) 방식이 한계인가요?
+<svg class="w-5 h-5 transform group-open:rotate-180 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+</svg>
+</summary>
+<div class="px-8 py-6 border-t border-border bg-deep/50">
+<p class="text-gray-400 leading-relaxed mb-4">2D 워핑은 이미지 픽셀을 기하학적으로 변형하는 방식으로, 의복 두께나 소재 특성을 전혀 고려하지 않습니다. 예를 들어, 두꺼운 패딩과 얇은 티셔츠가 같은 외곽선을 가지더라도 실제 신체 치수는 다릅니다. 또한 2D 워핑은 포즈 변화나 조명 차이에 취약하여 핏 일관성을 보장할 수 없습니다.</p>
+<p class="text-gray-400 leading-relaxed"><strong class="text-gray-200">Body-Fit AI의 접근:</strong> Volume-Offset Logic으로 의복 두께를 역산하고, Material Inference로 소재 특성을 추론하여 3D 물리 시뮬레이션과 연계. 이를 통해 "의복을 벗긴 상태의 신체 치수"를 복원하고, 다시 새 의복을 입혔을 때의 정확한 핏을 예측합니다.</p>
+</div>
+</details>
+
+<details class="bg-surface border border-border rounded-xl overflow-hidden group">
+<summary class="px-8 py-6 cursor-pointer font-display font-semibold text-lg hover:bg-surface-2 transition-colors flex items-center justify-between">
+Q2. 왜 미들웨어(Middleware)가 필요한가요? 비전과 3D를 바로 연결하면 안 되나요?
+<svg class="w-5 h-5 transform group-open:rotate-180 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+</svg>
+</summary>
+<div class="px-8 py-6 border-t border-border bg-deep/50">
+<p class="text-gray-400 leading-relaxed mb-4">비전 모델(YOLO, MediaPipe 등)은 2D 이미지 분석만 수행하고, 3D 물리 엔진(CLO3D)은 3D 공간의 메쉬와 물리 파라미터만 처리합니다. 이 둘 사이의 "번역(Translation)"이 없으면 파이프라인이 연결되지 않습니다.</p>
+<p class="text-gray-400 leading-relaxed mb-4"><strong class="text-gray-200">미들웨어의 역할:</strong></p>
+<ul class="list-disc list-inside space-y-2 text-gray-400 ml-4">
+<li><strong>Volume-Offset:</strong> 2D 외곽선 → 실측 3D 치수 변환</li>
+<li><strong>Material Inference:</strong> 이미지 텍스처 → 물리 시뮬 파라미터 매핑</li>
+<li><strong>Deformation Engine:</strong> 학습된 변형 패턴으로 시뮬 초기화 (warm-start)</li>
+</ul>
+<p class="text-gray-400 leading-relaxed mt-4">이 미들웨어 레이어가 독자 기술의 핵심이며, 기술 장벽(Moat)을 형성합니다.</p>
+</div>
+</details>
+
+<details class="bg-surface border border-border rounded-xl overflow-hidden group">
+<summary class="px-8 py-6 cursor-pointer font-display font-semibold text-lg hover:bg-surface-2 transition-colors flex items-center justify-between">
+Q3. 초기 데이터는 어떻게 확보하나요? 실제 데이터가 없으면 학습이 불가능하지 않나요?
+<svg class="w-5 h-5 transform group-open:rotate-180 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+</svg>
+</summary>
+<div class="px-8 py-6 border-t border-border bg-deep/50">
+<p class="text-gray-400 leading-relaxed mb-4">초기 단계에서는 <strong class="text-gray-200">CLO3D 기반 Synthetic Data Factory</strong>로 합성 데이터를 대량 생성합니다. CLO3D는 산업 표준 물리 시뮬레이션 엔진이므로, 생성된 데이터는 정확한 ground truth를 제공합니다.</p>
+<p class="text-gray-400 leading-relaxed mb-4"><strong class="text-gray-200">3-Phase 데이터 전략:</strong></p>
+<ol class="list-decimal list-inside space-y-2 text-gray-400 ml-4">
+<li><strong>Phase 1:</strong> 합성 데이터만으로 초기 모델 학습 (Deformation Engine, Material Inference)</li>
+<li><strong>Phase 2:</strong> PoC에서 실사용 데이터 소량 수집 → 도메인 갭 분석 및 보정</li>
+<li><strong>Phase 3:</strong> 합성(대량) + 실제(소량) 혼합 학습 → 지속적 플라이휠 구축</li>
+</ol>
+<p class="text-gray-400 leading-relaxed mt-4">합성 데이터의 장점: (1) 라벨링 100% 정확, (2) 희귀 케이스(특이 체형, 드문 소재) 생성 가능, (3) 데이터 증강 무한.</p>
+</div>
+</details>
+
+<details class="bg-surface border border-border rounded-xl overflow-hidden group">
+<summary class="px-8 py-6 cursor-pointer font-display font-semibold text-lg hover:bg-surface-2 transition-colors flex items-center justify-between">
+Q4. 처리 속도는 얼마나 빠른가요? 실시간 서비스가 가능한가요?
+<svg class="w-5 h-5 transform group-open:rotate-180 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+</svg>
+</summary>
+<div class="px-8 py-6 border-t border-border bg-deep/50">
+<p class="text-gray-400 leading-relaxed mb-4"><strong class="text-gray-200">현재 목표:</strong> 배치 처리 기준으로 상용 서비스 가능 수준 검증 예정 (PoC에서 측정). 정확한 처리시간은 확정되지 않았으며, 하드웨어 및 최적화 수준에 따라 달라집니다.</p>
+<p class="text-gray-400 leading-relaxed mb-4"><strong class="text-gray-200">속도 개선 전략:</strong></p>
+<ul class="list-disc list-inside space-y-2 text-gray-400 ml-4">
+<li><strong>Deformation Engine:</strong> warm-start로 물리 시뮬 반복 횟수 감소 목표</li>
+<li><strong>비동기 처리:</strong> 유저는 사진 업로드 후 결과를 나중에 확인 (이메일/푸시 알림)</li>
+<li><strong>캐싱:</strong> 동일 아이템에 대한 사전 시뮬레이션 결과 재사용</li>
+<li><strong>GPU 가속:</strong> 추론 및 렌더링 단계 병렬화</li>
+</ul>
+<p class="text-gray-400 leading-relaxed mt-4">Pilot 단계에서는 준실시간(수 분 이내) 목표, Scale 단계에서 실시간 AR 통합 계획.</p>
+</div>
+</details>
+
+<details class="bg-surface border border-border rounded-xl overflow-hidden group">
+<summary class="px-8 py-6 cursor-pointer font-display font-semibold text-lg hover:bg-surface-2 transition-colors flex items-center justify-between">
+Q5. 경쟁사(범용 가상피팅) 대비 차별점은 무엇인가요?
+<svg class="w-5 h-5 transform group-open:rotate-180 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+</svg>
+</summary>
+<div class="px-8 py-6 border-t border-border bg-deep/50">
+<p class="text-gray-400 leading-relaxed mb-4"><strong class="text-gray-200">대부분의 기존 솔루션:</strong> 2D 워핑 기반이거나, 범용 3D 아바타에 의류를 단순 입히는 방식. 소재별 핏 차이를 학습하지 못하고, 사진 1장만으로는 정확도 보장 어려움.</p>
+<p class="text-gray-400 leading-relaxed mb-4"><strong class="text-gray-200">Body-Fit AI의 차별점:</strong></p>
+<ol class="list-decimal list-inside space-y-3 text-gray-400 ml-4">
+<li><strong>사진 1장 기반:</strong> PnP + Volume-Offset으로 실측 치수 복원 (다각도 촬영 불필요)</li>
+<li><strong>소재별 핏 학습:</strong> Material Inference + Deformation Engine으로 "면 티셔츠 vs 니트 스웨터" 같은 핏 차이를 학습·반영</li>
+<li><strong>물리 시뮬 기반:</strong> 기하학적 정확도 + 물리적 사실성 동시 확보</li>
+<li><strong>독자 미들웨어:</strong> 비전-물리 번역 레이어를 모듈화하여 B2B API 제품화 가능 (범용 엔진 대비 특화)</li>
+<li><strong>데이터 플라이휠:</strong> 합성 데이터 공장으로 지속 개선 루프 구축 (경쟁사 모방 어려움)</li>
+</ol>
+</div>
+</details>
+
+<details class="bg-surface border border-border rounded-xl overflow-hidden group">
+<summary class="px-8 py-6 cursor-pointer font-display font-semibold text-lg hover:bg-surface-2 transition-colors flex items-center justify-between">
+Q6. 측정 정확도는 얼마나 되나요?
+<svg class="w-5 h-5 transform group-open:rotate-180 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+</svg>
+</summary>
+<div class="px-8 py-6 border-t border-border bg-deep/50">
+<p class="text-gray-400 leading-relaxed mb-4"><strong class="text-gray-200">현 단계:</strong> 확정된 정확도 수치는 없습니다. PoC에서 A/B 테스트 및 반품 사유 설문을 통해 "반품률 감소 여부"를 간접적으로 측정 예정입니다.</p>
+<p class="text-gray-400 leading-relaxed mb-4"><strong class="text-gray-200">정확도 정의의 어려움:</strong> 가상피팅의 목표는 "mm 단위 정확도"가 아니라 "유저가 핏을 예측 가능하게 하여 반품을 줄이는 것"입니다. 따라서 절대 오차보다는 <strong>비즈니스 지표(반품률, 전환율)</strong>로 검증합니다.</p>
+<p class="text-gray-400 leading-relaxed"><strong class="text-gray-200">검증 계획:</strong> PoC에서 협력 쇼핑몰의 실제 반품 데이터를 분석하여, "사이즈/핏 불만족" 사유가 유의미하게 감소하는지 측정. 이것이 기술적 성공의 지표입니다.</p>
+</div>
+</details>
+</div>
+</div>
+</section>
+
+<footer class="relative py-16 border-t border-border">
+<div class="max-w-7xl mx-auto px-6">
+<div class="grid md:grid-cols-3 gap-12">
+<div>
+<div class="flex items-center gap-3 mb-4">
+<div class="w-12 h-12 rounded-xl bg-gradient-to-br from-accent to-accent-2 flex items-center justify-center font-bold text-deep text-xl">FFAI</div>
+<div>
+<div class="font-display font-bold text-xl">FORM FOUNDRY AI</div>
+<div class="font-mono text-xs text-gray-500">Middleware Architecture</div>
+</div>
+</div>
+<p class="text-gray-400 text-sm leading-relaxed">
+사진 1장 기반 체형 복원 + 가상피팅 자동화 미들웨어 설계. 비전-물리 번역 기술로 핏 예측 정확도 향상 목표.
+</p>
+</div>
+<div>
+<h4 class="font-display font-bold mb-4">핵심 기술 모듈</h4>
+<ul class="space-y-2 text-sm text-gray-400">
+<li>• PnP Calibration & Scale</li>
+<li>• YOLO Segmentation</li>
+<li>• Material Inference (ViT/Swin)</li>
+<li>• Volume-Offset Logic ★</li>
+<li>• Deformation Engine ★</li>
+<li>• Synthetic Data Factory ★</li>
+<li>• SMPL-X & IK</li>
+<li>• CLO3D Automation</li>
+<li>• SDXL + ControlNet</li>
+</ul>
+</div>
+
+<div>
+<h4 class="font-display font-bold mb-4">검증 계획</h4>
+<div class="space-y-3 text-sm text-gray-400">
+<div>
+<div class="font-semibold text-gray-300">PoC 지표 (측정 예정)</div>
+<div>반품률 감소, 전환율, 처리시간</div>
+</div>
+<div>
+<div class="font-semibold text-gray-300">검증 방식</div>
+<div>A/B 테스트, 반품 사유 설문</div>
+</div>
+<div>
+<div class="font-semibold text-gray-300">데이터 전략</div>
+<div>합성 → PoC 실사용 → 혼합 학습</div>
+</div>
+</div>
+</div>
+</div>
+
+<div class="mt-12 pt-8 border-t border-border flex flex-col md:flex-row items-center justify-between gap-4">
+<div class="text-sm text-gray-500 font-mono">
+Technical Architecture Documentation v1.0 | For Evaluation Purpose 2026
+</div>
+<div class="flex items-center gap-6 text-sm text-gray-500">
+<span></span>
+<span class="font-mono">NEXUSSPHERE 대표이사 유정하 </span>
+</div>
+</div>
+
+<div class="mt-8 p-6 rounded-xl bg-deep border border-warning/30">
+<div class="flex items-start gap-3">
+<svg class="w-6 h-6 text-warning flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+</svg>
+<div class="text-sm text-gray-400">
+<strong class="text-warning">주의:</strong> 본 문서의 모든 수치 및 성능 지표는 "측정 예정" 또는 "Target" 수준이며, 확정된 결과가 아닙니다. PoC 단계에서 실제 측정을 통해 검증될 예정입니다. 과장된 주장이나 확정 표현은 포함되지 않았습니다.
+</div>
+</div>
+</div>
+</div>
+</footer>
+
+<script>
+// Scroll reveal animation
+const observerOptions = {
+threshold: 0.1,
+rootMargin: '0px 0px -100px 0px'
+};
+
+const observer = new IntersectionObserver((entries) => {
+entries.forEach(entry => {
+if (entry.isIntersecting) {
+entry.target.classList.add('active');
+}
+});
+}, observerOptions);
+
+document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
+
+// Scrollytelling Logic (Updated for Sticky + Non-overlapping)
+(() => {
+const track = document.getElementById('hTrack');
+const spacer = document.getElementById('storySpacer');
+const panels = Array.from(document.querySelectorAll('#hTrack .panel'));
+
+if (!track || !spacer || panels.length === 0) return;
+
+const meta = [
+{ step:'01', title:'PnP Calibration', desc:'참조 객체 기반 스케일 추정(픽셀→mm 변환) 기초 단계.', bullets:['Reference plane(A4/marker)','Camera pose & scale','Guide-based capture'], out:'scale_factor, camera_pose' },
+{ step:'02', title:'YOLO Segmentation', desc:'인물/의복 영역을 분리하고 카테고리 컨텍스트를 확보.', bullets:['Instance segmentation','Garment category','Region-of-interest'], out:'mask, category, bbox' },
+{ step:'03', title:'Material Inference', desc:'주름/음영 패턴으로 소재군·두께 특성을 확률적으로 추정.', bullets:['Wrinkle frequency','Thickness bucket','Confidence score'], out:'material_bucket, thickness_level' },
+{ step:'04', title:'Deformation Engine', desc:'변형 학습 모델이 Warm-start 파라미터를 산출해 시뮬을 가속.', bullets:['Neural surrogate','Warm-start params','Quality stabilization'], out:'warm_start_params' },
+{ step:'05', title:'Synthetic Data Factory', desc:'물리 시뮬 기반 합성 데이터 생성→학습→검증의 플라이휠.', bullets:['Sim → Dataset','Train → Deploy','PoC measure'], out:'deformation_dataset_v1' },
+{ step:'06', title:'GenAI Synthesis', desc:'Edge/Depth 가이드를 활용해 핏 정보가 유지되도록 합성.', bullets:['Control constraints','Photoreal enhancement','Consistency'], out:'final_render' },
+];
+
+const stepEl = document.getElementById('storyStep');
+const titleEl = document.getElementById('storyTitle');
+const descEl = document.getElementById('storyDesc');
+const bulletsEl = document.getElementById('storyBullets');
+const outEl = document.getElementById('storyOutput');
+const dotsEl = document.getElementById('storyDots');
+
+// Initialize Dots
+if (dotsEl) {
+dotsEl.innerHTML = meta.map((_, i) =>
+`<span class="w-2 h-2 rounded-full transition-all duration-300 ${i===0?'bg-accent w-4':'bg-border'}"></span>`
+).join('');
+}
+
+const setActive = (idx) => {
+if(idx < 0) idx = 0;
+if(idx >= meta.length) idx = meta.length - 1;
+
+const m = meta[idx];
+if (stepEl) stepEl.textContent = m.step;
+if (titleEl) titleEl.textContent = m.title;
+if (descEl) descEl.textContent = m.desc;
+if (bulletsEl) bulletsEl.innerHTML = m.bullets.map(x=>`<li>• ${x}</li>`).join('');
+if (outEl) outEl.textContent = m.out;
+
+if (dotsEl) {
+Array.from(dotsEl.children).forEach((d,i) => {
+if(i === idx) {
+d.className = 'w-4 h-2 rounded-full bg-accent transition-all duration-300';
+} else {
+d.className = 'w-2 h-2 rounded-full bg-border transition-all duration-300';
+}
+});
+}
+};
+
+// Scroll Calculation
+const container = track.parentElement;
+let maxShift = 0;
+
+const clamp = (v, a, b) => Math.min(Math.max(v, a), b);
+
+const recalc = () => {
+// track.scrollWidth가 패널들을 다 합친 길이
+// container.clientWidth가 보여지는 창의 길이
+maxShift = track.scrollWidth - container.clientWidth;
+};
+
+const onScroll = () => {
+const rect = spacer.getBoundingClientRect();
+const viewH = window.innerHeight;
+
+// 스크롤 영역 계산
+const startPoint = viewH * 0.8;
+const endPoint = -rect.height + viewH;
+
+const distance = startPoint - rect.top;
+const totalDistance = startPoint - endPoint;
+
+let progress = distance / totalDistance;
+progress = clamp(progress, 0, 1);
+
+const shiftPx = progress * maxShift;
+
+// Move Track
+track.style.transform = `translateX(${-shiftPx}px)`;
+
+// Update Active State
+const panelCount = panels.length;
+const idx = Math.min(Math.floor(progress * panelCount), panelCount - 1);
+setActive(idx);
+};
+
+recalc();
+window.addEventListener('resize', () => { recalc(); onScroll(); }, { passive: true });
+window.addEventListener('scroll', onScroll, { passive: true });
+
+// SVG Definitions with preserveAspectRatio applied
+const svg = {
+pnp: `
+<svg viewBox="0 0 900 420" preserveAspectRatio="xMidYMid meet" class="w-full h-full">
+<defs>
+<linearGradient id="gA" x1="0" x2="1">
+<stop offset="0" stop-color="#00d4ff" stop-opacity="0.25"/>
+<stop offset="1" stop-color="#7c3aed" stop-opacity="0.25"/>
+</linearGradient>
+<filter id="glow">
+<feGaussianBlur stdDeviation="4" result="b"/>
+<feMerge>
+<feMergeNode in="b"/>
+<feMergeNode in="SourceGraphic"/>
+</feMerge>
+</filter>
+</defs>
+<rect x="0" y="0" width="900" height="420" fill="#12121a"/>
+<g opacity="0.15">
+${Array.from({length:18}).map((_,i)=>`<line x1="0" y1="${i*24}" x2="900" y2="${i*24}" stroke="#00d4ff" />`).join('')}
+${Array.from({length:24}).map((_,i)=>`<line x1="${i*38}" y1="0" x2="${i*38}" y2="420" stroke="#00d4ff" />`).join('')}
+</g>
+<g transform="translate(110,210)" filter="url(#glow)">
+<polygon points="0,0 70,-45 70,45" fill="none" stroke="#00d4ff" stroke-width="3"/>
+<circle cx="88" cy="0" r="18" fill="none" stroke="#00d4ff" stroke-width="3"/>
+<text x="-10" y="78" fill="#9ca3af" font-family="JetBrains Mono" font-size="14">Camera</text>
+</g>
+<line x1="198" y1="210" x2="690" y2="135" stroke="#00d4ff" stroke-width="2" stroke-dasharray="8 8" opacity="0.7"/>
+<g transform="translate(650,80) skewY(6)">
+<rect x="0" y="0" width="170" height="240" fill="url(#gA)" stroke="#7c3aed" stroke-width="3"/>
+<text x="16" y="26" fill="#e5e7eb" font-family="JetBrains Mono" font-size="14">Reference Plane (A4)</text>
+<text x="16" y="52" fill="#9ca3af" font-family="JetBrains Mono" font-size="12">PnP / Homography</text>
+</g>
+${[
+[660,92,'P1'],[805,102,'P2'],[670,315,'P3'],[815,325,'P4']
+].map(([x,y,t])=>`
+<g>
+<circle cx="${x}" cy="${y}" r="7" fill="#00d4ff" opacity="0.9"/>
+<circle cx="${x}" cy="${y}" r="18" fill="none" stroke="#00d4ff" opacity="0.35" stroke-width="2"/>
+<text x="${x+14}" y="${y-10}" fill="#00d4ff" font-family="JetBrains Mono" font-size="12">${t}</text>
+</g>
+`).join('')}
+<g transform="translate(290,300)">
+<rect x="0" y="0" width="320" height="86" rx="12" fill="#0a0a0f" stroke="#2a2a38"/>
+<text x="18" y="28" fill="#9ca3af" font-family="JetBrains Mono" font-size="12">Concept</text>
+<text x="18" y="54" fill="#e5e7eb" font-family="JetBrains Mono" font-size="14">pixel → mm (scale_factor)</text>
+<text x="18" y="74" fill="#9ca3af" font-family="JetBrains Mono" font-size="12">output: camera_pose, scale_factor</text>
+</g>
+</svg>`,
+seg: `
+<svg viewBox="0 0 900 420" preserveAspectRatio="xMidYMid meet" class="w-full h-full">
+<defs>
+<linearGradient id="mask" x1="0" x2="1">
+<stop offset="0" stop-color="#00d4ff" stop-opacity="0.35"/>
+<stop offset="1" stop-color="#7c3aed" stop-opacity="0.35"/>
+</linearGradient>
+</defs>
+<rect x="0" y="0" width="900" height="420" fill="#12121a"/>
+<g transform="translate(330,40)">
+<circle cx="120" cy="70" r="52" fill="#1a1a24" stroke="#2a2a38" stroke-width="3"/>
+<path d="M70,140 Q120,110 170,140 L210,200 L190,330 Q120,360 50,330 L30,200 Z" fill="#1a1a24" stroke="#2a2a38" stroke-width="3"/>
+<path d="M70,160 Q120,130 170,160 L205,210 L188,320 Q120,345 52,320 L35,210 Z" fill="url(#mask)" stroke="#00d4ff" stroke-width="3"/>
+<rect x="28" y="120" width="214" height="230" fill="none" stroke="#10b981" stroke-width="2" stroke-dasharray="6 6"/>
+</g>
+<g font-family="JetBrains Mono" font-size="14">
+<rect x="48" y="44" width="210" height="40" rx="10" fill="#0a0a0f" stroke="#2a2a38"/>
+<text x="62" y="70" fill="#00d4ff">YOLOv8-seg</text>
+<rect x="48" y="96" width="280" height="112" rx="12" fill="#0a0a0f" stroke="#2a2a38"/>
+<text x="62" y="126" fill="#9ca3af">outputs</text>
+<text x="62" y="150" fill="#e5e7eb">mask, bbox, category</text>
+<text x="62" y="174" fill="#e5e7eb">confidence_score</text>
+<text x="62" y="198" fill="#9ca3af">ROI for next stage</text>
+</g>
+<g transform="translate(560,300)" font-family="JetBrains Mono" font-size="12">
+<rect x="0" y="0" width="300" height="92" rx="12" fill="#0a0a0f" stroke="#2a2a38"/>
+<text x="16" y="28" fill="#9ca3af">category (example)</text>
+<text x="16" y="52" fill="#7c3aed">HOODIE</text>
+<text x="120" y="52" fill="#10b981">conf: (measured in PoC)</text>
+<text x="16" y="74" fill="#9ca3af">mask guides material/offset</text>
+</g>
+</svg>`,
+mat: `
+<svg viewBox="0 0 900 420" preserveAspectRatio="xMidYMid meet" class="w-full h-full">
+<defs>
+<linearGradient id="heat" x1="0" x2="1">
+<stop offset="0" stop-color="#00d4ff" stop-opacity="0.35"/>
+<stop offset="1" stop-color="#f59e0b" stop-opacity="0.35"/>
+</linearGradient>
+</defs>
+<rect width="900" height="420" fill="#12121a"/>
+<g transform="translate(60,70)" font-family="JetBrains Mono">
+<text x="0" y="-18" fill="#9ca3af" font-size="12">Wrinkle Frequency (concept)</text>
+<path d="M0,120 C60,60 120,180 180,120 C240,60 300,180 360,120 C420,60 480,180 540,120" fill="none" stroke="#00d4ff" stroke-width="3"/>
+<path d="M0,160 C60,140 120,180 180,160 C240,140 300,180 360,160 C420,140 480,180 540,160" fill="none" stroke="#7c3aed" stroke-width="3" opacity="0.8"/>
+<rect x="0" y="200" width="540" height="140" rx="14" fill="#0a0a0f" stroke="#2a2a38"/>
+<text x="18" y="232" fill="#9ca3af" font-size="12">ViT / Swin Transformer</text>
+<text x="18" y="260" fill="#e5e7eb" font-size="14">infer: thickness / stiffness / density (prob.)</text>
+<text x="18" y="290" fill="#9ca3af" font-size="12">outputs: material_bucket, thickness_level</text>
+<text x="18" y="320" fill="#9ca3af" font-size="12">used by: Volume-Offset / Deformation Engine</text>
+</g>
+<g transform="translate(650,70)">
+<rect x="0" y="0" width="190" height="190" rx="16" fill="url(#heat)" stroke="#2a2a38"/>
+${Array.from({length:6}).map((_,i)=>Array.from({length:6}).map((__,j)=>{
+const o=(i+j)%3===0?0.55:0.25;
+return `<rect x="${14+j*28}" y="${14+i*28}" width="22" height="22" rx="6" fill="#0a0a0f" opacity="${o}"/>`;
+}).join('')).join('')}
+<text x="0" y="220" fill="#9ca3af" font-family="JetBrains Mono" font-size="12">Shadow/Texture cues</text>
+</g>
+</svg>`,
+def: `
+<svg viewBox="0 0 900 420" preserveAspectRatio="xMidYMid meet" class="w-full h-full">
+<defs>
+<linearGradient id="pipe" x1="0" x2="1">
+<stop offset="0" stop-color="#00d4ff" stop-opacity="0.25"/>
+<stop offset="1" stop-color="#7c3aed" stop-opacity="0.25"/>
+</linearGradient>
+</defs>
+<rect width="900" height="420" fill="#12121a"/>
+<g font-family="JetBrains Mono">
+<text x="60" y="70" fill="#9ca3af" font-size="12">Deformation Engine (learned surrogate, concept)</text>
+<rect x="60" y="105" width="210" height="110" rx="16" fill="#0a0a0f" stroke="#2a2a38"/>
+<text x="78" y="140" fill="#e5e7eb" font-size="14">Inputs</text>
+<text x="78" y="165" fill="#9ca3af" font-size="12">material_bucket</text>
+<text x="78" y="186" fill="#9ca3af" font-size="12">body_params (SMPL-X)</text>
+<text x="78" y="207" fill="#9ca3af" font-size="12">pose (from IK)</text>
+
+<rect x="345" y="90" width="210" height="140" rx="16" fill="url(#pipe)" stroke="#00d4ff" stroke-width="2"/>
+<text x="365" y="128" fill="#00d4ff" font-size="14">Neural Surrogate</text>
+<text x="365" y="154" fill="#0a0a0f" font-size="12">predict deformation hints</text>
+<text x="365" y="176" fill="#0a0a0f" font-size="12">(warm-start params)</text>
+
+<rect x="630" y="105" width="210" height="110" rx="16" fill="#0a0a0f" stroke="#2a2a38"/>
+<text x="648" y="140" fill="#e5e7eb" font-size="14">Outputs</text>
+<text x="648" y="165" fill="#9ca3af" font-size="12">warm_start_params</text>
+<text x="648" y="186" fill="#9ca3af" font-size="12">stability hints</text>
+
+<path d="M270,160 L345,160" stroke="#10b981" stroke-width="3" marker-end="url(#a)"/>
+<path d="M555,160 L630,160" stroke="#10b981" stroke-width="3" marker-end="url(#a)"/>
+<defs>
+<marker id="a" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
+<polygon points="0,0 10,4 0,8" fill="#10b981"/>
+</marker>
+</defs>
+
+<rect x="60" y="255" width="780" height="120" rx="18" fill="#0a0a0f" stroke="#2a2a38"/>
+<text x="82" y="290" fill="#9ca3af" font-size="12">Idea</text>
+<text x="82" y="318" fill="#e5e7eb" font-size="14">Use learned deformation hints to initialize physics simulation (warm-start)</text>
+<text x="82" y="346" fill="#9ca3af" font-size="12">Goal: reduce iteration + stabilize draping — measured in PoC (no fixed claim)</text>
+</g>
+</svg>`,
+factory: `
+<svg viewBox="0 0 900 420" preserveAspectRatio="xMidYMid meet" class="w-full h-full">
+<rect width="900" height="420" fill="#12121a"/>
+<g font-family="JetBrains Mono">
+<text x="60" y="70" fill="#9ca3af" font-size="12">Synthetic Data Factory (CLO3D-based)</text>
+<g transform="translate(140,115)">
+<circle cx="250" cy="120" r="110" fill="none" stroke="#00d4ff" stroke-width="3" opacity="0.5"/>
+<circle cx="250" cy="120" r="150" fill="none" stroke="#7c3aed" stroke-width="2" opacity="0.35" stroke-dasharray="8 8"/>
+${[
+['CLO3D Sim',250,10,'#00d4ff'],
+['Dataset',390,120,'#10b981'],
+['Train',250,230,'#f59e0b'],
+['Deploy',110,120,'#7c3aed'],
+].map(([t,x,y,c])=>`
+<g>
+<circle cx="${x}" cy="${y}" r="42" fill="#0a0a0f" stroke="${c}" stroke-width="3"/>
+<text x="${x}" y="${y+5}" fill="#e5e7eb" font-size="12" text-anchor="middle">${t}</text>
+</g>
+`).join('')}
+<path d="M250,52 C330,70 350,80 368,105" fill="none" stroke="#10b981" stroke-width="3"/>
+<path d="M348,150 C320,210 300,220 250,230" fill="none" stroke="#f59e0b" stroke-width="3"/>
+<path d="M210,230 C160,210 135,190 120,150" fill="none" stroke="#7c3aed" stroke-width="3"/>
+<path d="M120,105 C140,70 190,55 250,52" fill="none" stroke="#00d4ff" stroke-width="3"/>
+</g>
+<rect x="560" y="120" width="300" height="240" rx="18" fill="#0a0a0f" stroke="#2a2a38"/>
+<text x="580" y="150" fill="#e5e7eb" font-size="14">Why it matters</text>
+<text x="580" y="178" fill="#9ca3af" font-size="12">• early-stage data scarcity mitigation</text>
+<text x="580" y="202" fill="#9ca3af" font-size="12">• material-fit pair structured outputs</text>
+<text x="580" y="226" fill="#9ca3af" font-size="12">• supports Deformation Engine training</text>
+<text x="580" y="250" fill="#9ca3af" font-size="12">• PoC feedback loop → refine</text>
+</g>
+</svg>`,
+gen: `
+<svg viewBox="0 0 900 420" preserveAspectRatio="xMidYMid meet" class="w-full h-full">
+<rect width="900" height="420" fill="#12121a"/>
+<g font-family="JetBrains Mono">
+<text x="60" y="70" fill="#9ca3af" font-size="12">GenAI Synthesis (SDXL + ControlNet)</text>
+
+<rect x="60" y="110" width="220" height="250" rx="18" fill="#0a0a0f" stroke="#2a2a38"/>
+<text x="80" y="145" fill="#e5e7eb" font-size="14">Inputs</text>
+<text x="80" y="175" fill="#9ca3af" font-size="12">3D render / mesh</text>
+<text x="80" y="200" fill="#9ca3af" font-size="12">Canny edge</text>
+<text x="80" y="225" fill="#9ca3af" font-size="12">Depth map</text>
+<text x="80" y="250" fill="#9ca3af" font-size="12">prompt (style)</text>
+
+<rect x="340" y="140" width="220" height="190" rx="18" fill="none" stroke="#00d4ff" stroke-width="3"/>
+<text x="360" y="170" fill="#00d4ff" font-size="14">ControlNet</text>
+<text x="360" y="200" fill="#9ca3af" font-size="12">constraints keep fit</text>
+
+<rect x="620" y="110" width="220" height="250" rx="18" fill="#0a0a0f" stroke="#2a2a38"/>
+<text x="640" y="145" fill="#e5e7eb" font-size="14">Output</text>
+<text x="640" y="175" fill="#9ca3af" font-size="12">photoreal image</text>
+<text x="640" y="200" fill="#9ca3af" font-size="12">fit-consistent render</text>
+<text x="640" y="225" fill="#9ca3af" font-size="12">(quality measured in PoC)</text>
+
+<path d="M280,235 L340,235" stroke="#10b981" stroke-width="3" marker-end="url(#b)"/>
+<path d="M560,235 L620,235" stroke="#10b981" stroke-width="3" marker-end="url(#b)"/>
+<defs>
+<marker id="b" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
+<polygon points="0,0 10,4 0,8" fill="#10b981"/>
+</marker>
+</defs>
+
+<g transform="translate(350,250)" opacity="0.9">
+<path d="M10,40 L90,40 L95,70 L90,100 L10,100 L5,70 Z" fill="none" stroke="#00d4ff" stroke-width="2"/>
+<circle cx="50" cy="20" r="18" fill="none" stroke="#00d4ff" stroke-width="2"/>
+<rect x="120" y="10" width="90" height="90" rx="12" fill="url(#d)" stroke="#7c3aed"/>
+<defs>
+<linearGradient id="d" x1="0" x2="0" y1="0" y2="1">
+<stop offset="0" stop-color="#ffffff" stop-opacity="0.2"/>
+<stop offset="1" stop-color="#000000" stop-opacity="0.35"/>
+</linearGradient>
+</defs>
+</g>
+</g>
+</svg>`
+};
+
+const mount = (id, html) => { const el=document.getElementById(id); if(el) el.innerHTML = html; };
+mount('svgPnp', svg.pnp);
+mount('svgSeg', svg.seg);
+mount('svgMat', svg.mat);
+mount('svgDef', svg.def);
+mount('svgFactory', svg.factory);
+mount('svgGen', svg.gen);
+
+})();
+// Mobile Menu Toggle
+const mobileMenuBtn = document.getElementById('mobileMenuBtn');
+const closeMobileMenu = document.getElementById('closeMobileMenu');
+const mobileMenu = document.getElementById('mobileMenu');
+const mobileNavLinks = document.querySelectorAll('.mobile-nav-link');
+
+if (mobileMenuBtn) {
+mobileMenuBtn.addEventListener('click', () => {
+mobileMenu.classList.add('open');
+});
+}
+
+if (closeMobileMenu) {
+closeMobileMenu.addEventListener('click', () => {
+mobileMenu.classList.remove('open');
+});
+}
+
+mobileNavLinks.forEach(link => {
+link.addEventListener('click', () => {
+mobileMenu.classList.remove('open');
+});
+});
+
+// Header scroll effect
+const header = document.querySelector('header');
+if (header) {
+window.addEventListener('scroll', () => {
+if (window.scrollY > 100) {
+header.classList.add('scrolled');
+} else {
+header.classList.remove('scrolled');
+}
+});
+}
+
+// Active nav link on scroll
+const sections = document.querySelectorAll('section[id]');
+const navLinks = document.querySelectorAll('.nav-link');
+
+window.addEventListener('scroll', () => {
+let current = '';
+
+sections.forEach(section => {
+const sectionTop = section.offsetTop;
+const sectionHeight = section.clientHeight;
+if (pageYOffset >= (sectionTop - 200)) {
+current = section.getAttribute('id');
+}
+});
+
+navLinks.forEach(link => {
+link.classList.remove('active');
+if (link.getAttribute('href') === `#${current}`) {
+link.classList.add('active');
+}
+});
+});
+</script>
+</body>
+</html>
+
